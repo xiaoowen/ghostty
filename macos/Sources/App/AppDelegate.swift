@@ -329,6 +329,9 @@ class AppDelegate: NSObject,
         // Setup our menu
         setupMenuImages()
 
+        // Tools menu (keep-awake, remote hosts) and its menu bar indicator.
+        ToolsMenuController.shared.install()
+
         // Setup signal handlers
         setupSignals()
 
@@ -1143,6 +1146,8 @@ class AppDelegate: NSObject,
 extension AppDelegate {
     /// This is called for the dock right-click menu.
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        // Rebuild so the Tools items show the current keep-awake state and hosts.
+        reloadDockMenu()
         return dockMenu
     }
 
@@ -1153,6 +1158,10 @@ extension AppDelegate {
         dockMenu.removeAllItems()
         dockMenu.addItem(newWindow)
         dockMenu.addItem(newTab)
+
+        for item in ToolsMenuController.shared.dockMenuItems() {
+            dockMenu.addItem(item)
+        }
     }
 
     /// Setup all the images for our menu items.
