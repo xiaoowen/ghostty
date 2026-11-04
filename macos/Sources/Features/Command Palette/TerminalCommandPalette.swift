@@ -79,8 +79,13 @@ struct TerminalCommandPaletteView: View {
         // Sort the rest. We replace ":" with a character that sorts before space
         // so that "Foo:" sorts before "Foo Bar:". Use sortKey as a tie-breaker
         // for stable ordering when titles are equal.
-        options.append(contentsOf: sortedTerminalPaletteOptions(jumpOptions + terminalOptions))
+        options.append(contentsOf: sortedTerminalPaletteOptions(jumpOptions + terminalOptions + toolOptions))
         return options
+    }
+
+    /// Commands from the Tools menu: keep-awake and remote host sessions.
+    private var toolOptions: [CommandOption] {
+        ToolsMenuController.shared.paletteOptions()
     }
 
     /// Commands for installing or canceling available updates.

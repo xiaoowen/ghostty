@@ -25,6 +25,9 @@ class TerminalWindow: NSWindow {
     /// Update notification UI in titlebar
     private let updateAccessory = NSTitlebarAccessoryViewController()
 
+    /// Keep-awake and remote host buttons in titlebar
+    private let toolsAccessory = NSTitlebarAccessoryViewController()
+
     /// Visual indicator that mirrors the selected tab color.
     private lazy var tabColorIndicator: NSHostingView<TabColorIndicatorView> = {
         let view = NSHostingView(rootView: TabColorIndicatorView(tabColor: tabColor))
@@ -153,6 +156,17 @@ class TerminalWindow: NSWindow {
                 ))
                 addTitlebarAccessoryViewController(updateAccessory)
                 updateAccessory.view.translatesAutoresizingMaskIntoConstraints = false
+
+                // Keep-awake and remote host buttons, set up like the update accessory
+                toolsAccessory.layoutAttribute = .right
+                toolsAccessory.view = NonDraggableHostingView(rootView: ToolsAccessoryView(
+                    viewModel: viewModel,
+                    keepAwake: .shared,
+                    hosts: .shared,
+                    preferences: .shared
+                ))
+                addTitlebarAccessoryViewController(toolsAccessory)
+                toolsAccessory.view.translatesAutoresizingMaskIntoConstraints = false
             }
         }
 
@@ -717,6 +731,20 @@ extension TerminalWindow {
                 // We always need space at the end of the titlebar
                 .padding(.trailing, 10)
             }
+        }
+    }
+
+    /// The keep-awake and remote host buttons, placed like the update pill.
+    struct ToolsAccessoryView: View {
+        @ObservedObject var viewModel: ViewModel
+        let keepAwake: KeepAwake
+        let hosts: RemoteHostsModel
+        let preferences: ToolsPreferences
+
+        var body: some View {
+            TitlebarToolsView(keepAwake: keepAwake, hosts: hosts, preferences: preferences)
+                .padding(.top, viewModel.accessoryTopPadding)
+                .padding(.trailing, viewModel.accessoryTopPadding)
         }
     }
 
