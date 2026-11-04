@@ -213,7 +213,12 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
                 submenu.addItem(Self.disabledItem("没有可用于 \(kind.label) 的主机"))
             }
             for host in usable {
-                let item = NSMenuItem(title: host.name, action: #selector(openRemote(_:)), keyEquivalent: "")
+                let loggedIn = host.muxPlan.map(RemoteMux.isActive) ?? false
+                let item = NSMenuItem(
+                    title: loggedIn ? "\(host.name) · 已登录" : host.name,
+                    action: #selector(openRemote(_:)),
+                    keyEquivalent: ""
+                )
                 item.target = self
                 item.representedObject = RemoteMenuTarget(host: host, kind: kind)
                 item.toolTip = host.displayCommand(for: kind)
@@ -317,6 +322,16 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
                     leadingIcon: kind.symbolName
                 ) {
                     RemoteLauncher.open(host, kind: kind)
+                })
+            }
+
+            if let plan = host.muxPlan, RemoteMux.isActive(plan) {
+                options.append(CommandOption(
+                    title: "断开登录：\(host.name)",
+                    subtitle: "关闭复用的连接和使用它的会话",
+                    leadingIcon: "xmark.circle"
+                ) {
+                    RemoteMux.disconnect(plan)
                 })
             }
 

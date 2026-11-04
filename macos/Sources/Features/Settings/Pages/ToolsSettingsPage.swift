@@ -28,6 +28,8 @@ struct ToolsSettingsPage: View {
             hostsSection
         }
         .onAppear { hosts.refresh() }
+        // Logged-in connections expire on their own; keep the labels current.
+        .onReceive(Timer.publish(every: 15, on: .main, in: .common).autoconnect()) { _ in hosts.refresh() }
         .sheet(item: $editing) { item in
             HostEditor(
                 host: item.host,
@@ -117,6 +119,7 @@ struct ToolsSettingsPage: View {
         SettingsSection(
             "远程主机",
             footer: "也可以从菜单栏「工具」、命令面板和 Dock 菜单连接。密码保存在登录钥匙串（服务名 \(RemoteKeychain.service)）。"
+                + "开启复用登录的主机，登录一次后，新开的 SSH/SFTP 会复用这条连接，不再要求密码和 MFA。"
         ) {
             if case .invalid(let error) = hosts.state {
                 SettingsBanner(symbol: "exclamationmark.triangle.fill", tint: .orange, text: "主机列表有误：\(error)")
@@ -142,7 +145,9 @@ struct ToolsSettingsPage: View {
                 HostRow(
                     host: host,
                     passwordSaved: hosts.savedPasswords.contains(host.name),
+                    loggedIn: hosts.loggedIn.contains(host.name),
                     onEdit: { editing = EditingHost(host: host, original: host.name) },
+                    onDisconnect: { hosts.disconnect(host) },
                     onDelete: { deleting = host }
                 )
                 SettingsDivider()
@@ -187,7 +192,9 @@ private struct EditingHost: Identifiable {
 private struct HostRow: View {
     let host: RemoteHost
     let passwordSaved: Bool
+    let loggedIn: Bool
     let onEdit: () -> Void
+    let onDisconnect: () -> Void
     let onDelete: () -> Void
 
     private var isCustom: Bool {
@@ -214,6 +221,10 @@ private struct HostRow: View {
                             tint: passwordSaved ? .green : .orange
                         )
                     }
+                    if loggedIn {
+                        CapsuleLabel(text: "已登录", symbol: "link", tint: .accentColor)
+                            .help("新开的 SSH/SFTP 会复用这条连接，不用再验证")
+                    }
                     if isCustom {
                         CapsuleLabel(text: "自定义命令")
                     }
@@ -239,6 +250,9 @@ private struct HostRow: View {
 
             Menu {
                 Button("编辑…", action: onEdit)
+                if loggedIn {
+                    Button("断开登录", action: onDisconnect)
+                }
                 Divider()
                 Button("删除…", role: .destructive, action: onDelete)
             } label: {
@@ -339,6 +353,16 @@ struct HostEditor: View {
                 Toggle("rz/sz 传文件（--zmodem）", isOn: flag(\.zmodem, default: true))
                 Toggle("拖文件到窗口上传（--dragfile）", isOn: flag(\.dragFile, default: false))
             }
+            Picker("复用登录", selection: reuse) {
+                Text("关闭").tag(0)
+                Text("15 分钟").tag(15)
+                Text("1 小时").tag(60)
+                Text("4 小时").tag(240)
+                Text("8 小时").tag(480)
+                if !RemoteMux.minuteChoices.contains(reuse.wrappedValue) {
+                    Text("\(reuse.wrappedValue) 分钟").tag(reuse.wrappedValue)
+                }
+            }
             Toggle("自动接受新的主机指纹", isOn: flag(\.acceptHostKey, default: false))
             Toggle("自动填写密码", isOn: flag(\.autoPassword, default: true))
             if draft.autoPassword ?? true {
@@ -351,7 +375,7 @@ struct HostEditor: View {
         } header: {
             Text("连接")
         } footer: {
-            Text("SSH 和 SFTP 都用这些信息；MFA 验证码仍需在终端里手动输入。")
+            Text("SSH 和 SFTP 共用这些信息，MFA 验证码在终端里手动输入。复用登录：登录一次后，所选时间内新开的 SSH/SFTP 不再验证。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -385,6 +409,14 @@ struct HostEditor: View {
         Binding(
             get: { draft[keyPath: keyPath] ?? value },
             set: { draft[keyPath: keyPath] = $0 == value ? nil : $0 }
+        )
+    }
+
+    /// Stores nil for the default (60) so the JSON stays short.
+    private var reuse: Binding<Int> {
+        Binding(
+            get: { draft.reuseMinutes ?? RemoteMux.defaultMinutes },
+            set: { draft.reuseMinutes = $0 == RemoteMux.defaultMinutes ? nil : $0 }
         )
     }
 

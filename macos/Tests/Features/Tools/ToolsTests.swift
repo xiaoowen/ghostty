@@ -67,21 +67,25 @@ struct RemoteHostLaunchTests {
         return nil
     }
 
-    @Test func structuredHostUsesTsshWithZmodemByDefault() {
+    @Test func structuredHostUsesTsshWithZmodemAndReuseByDefault() {
         let host = RemoteHost(name: "堡垒机", host: " bastion ", user: "jumpserver", port: 60022)
+        let plan = RemoteMux.plan(destination: "jumpserver@bastion", port: 60022, minutes: 60)
         #expect(managed(host, .ssh) == RemoteManagedSession(
-            argv: ["tssh", "--zmodem", "-p", "60022", "jumpserver@bastion"],
+            argv: ["tssh", "--zmodem", "-p", "60022", "-o", "ControlPath=\(plan.controlPath)", "jumpserver@bastion"],
             keychainAccount: "堡垒机",
             autoPassword: true,
-            acceptHostKey: false
+            acceptHostKey: false,
+            mux: plan
         ))
-        #expect(managed(host, .sftp)?.argv == ["sftp", "-P", "60022", "jumpserver@bastion"])
+        #expect(managed(host, .sftp)?.argv
+            == ["sftp", "-P", "60022", "-o", "ControlPath=\(plan.controlPath)", "jumpserver@bastion"])
+        // Tooltips leave the control socket out.
         #expect(host.displayCommand(for: .ssh) == "tssh --zmodem -p 60022 jumpserver@bastion")
         #expect(host.usesKeychainPassword)
     }
 
     @Test func clientOptions() {
-        var host = RemoteHost(name: "a", host: "h", sshClient: "tssh", zmodem: false, dragFile: true)
+        var host = RemoteHost(name: "a", host: "h", sshClient: "tssh", zmodem: false, dragFile: true, reuseMinutes: 0)
         #expect(managed(host, .ssh)?.argv == ["tssh", "--dragfile", "h"])
 
         // tssh-only flags are dropped for plain ssh.
@@ -96,7 +100,7 @@ struct RemoteHostLaunchTests {
     }
 
     @Test func customCommandWinsPerKind() {
-        let host = RemoteHost(name: "a", sshCommand: "  tjump \n", sftpCommand: "", host: "h")
+        let host = RemoteHost(name: "a", sshCommand: "  tjump \n", sftpCommand: "", host: "h", reuseMinutes: 0)
         #expect(host.launch(for: .ssh) == .custom("tjump"))
         #expect(managed(host, .sftp)?.argv == ["sftp", "h"])
         // Only the SFTP session fills a password.
@@ -407,5 +411,76 @@ struct RemoteHostsModelTests {
         let error = model.save(RemoteHost(name: "a", host: "h"), replacing: nil, password: "")
         #expect(error == "remote-hosts.json 有错误（不是有效的 JSON），请先在编辑器里修正")
         #expect(try String(contentsOf: dir.appendingPathComponent("remote-hosts.json"), encoding: .utf8) == "{ broken")
+    }
+}
+
+@Suite
+struct RemoteMuxTests {
+    private let directory = URL(fileURLWithPath: "/tmp/mux")
+
+    @Test func planCommands() {
+        let plan = RemoteMux.plan(destination: "me@h", port: 60022, minutes: 90, directory: directory)
+        let path = "/tmp/mux/" + RemoteMux.socketName(destination: "me@h", port: 60022)
+        #expect(plan.controlPath == path)
+        #expect(plan.masterArgv == [
+            "ssh", "-f", "-N", "-o", "ControlMaster=yes", "-o", "ControlPath=\(path)",
+            "-o", "ControlPersist=90m", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3",
+            "-p", "60022", "me@h",
+        ])
+        #expect(plan.checkArgv == ["ssh", "-o", "ControlPath=\(path)", "-O", "check", "me@h"])
+        #expect(plan.exitArgv == ["ssh", "-o", "ControlPath=\(path)", "-O", "exit", "me@h"])
+    }
+
+    @Test func socketNames() {
+        let name = RemoteMux.socketName(destination: "jumpserver@bastion.example.com", port: 60022)
+        #expect(name.count == 16 && name.allSatisfy(\.isHexDigit))
+        #expect(name == RemoteMux.socketName(destination: "jumpserver@bastion.example.com", port: 60022))
+        #expect(name != RemoteMux.socketName(destination: "jumpserver@bastion.example.com", port: 22))
+        #expect(RemoteMux.socketName(destination: "h", port: nil) == RemoteMux.socketName(destination: "h", port: 22))
+        // Unix socket paths are limited to about 104 bytes.
+        #expect(RemoteMux.directory.appendingPathComponent(name).path.utf8.count < 100)
+    }
+
+    @Test func reuseIsPerHost() {
+        #expect(RemoteHost(name: "a", host: "h").muxPlan?.minutes == 60)
+        #expect(RemoteHost(name: "a", host: "h", reuseMinutes: 15).muxPlan?.minutes == 15)
+        #expect(RemoteHost(name: "a", host: "h", reuseMinutes: 0).muxPlan == nil)
+        #expect(RemoteHost(name: "a", sshCommand: "tjump").muxPlan == nil)
+        #expect(RemoteHost(name: "a", host: "h", reuseMinutes: 2000).validationError()
+            == "主机「a」的 reuseMinutes 必须在 0–1440 之间")
+    }
+
+    @Test func scriptLogsInOnceThenExecsTheSession() {
+        let plan = RemoteMux.plan(destination: "me@h", port: nil, minutes: 60, directory: directory)
+        let session = RemoteManagedSession(
+            argv: ["tssh"] + plan.clientOptions + ["me@h"],
+            keychainAccount: "堡垒机",
+            autoPassword: true,
+            acceptHostKey: false,
+            mux: plan
+        )
+        let script = RemoteCommand.script(for: .managed(session), scriptPath: { "/s.exp" }, service: "svc")
+        let control = "'-o' 'ControlPath=\(plan.controlPath)'"
+        let expect = "'/usr/bin/expect' '-f' '/s.exp' 'svc' '堡垒机' '1' 'ask' '--'"
+
+        #expect(script.hasPrefix("if 'ssh' \(control) '-O' 'check' 'me@h' >/dev/null 2>&1; then "))
+        #expect(script.contains("else \(expect) 'ssh' '-f' '-N' '-o' 'ControlMaster=yes' \(control)"))
+        #expect(script.contains("|| exit $?; "))
+        #expect(script.hasSuffix("fi; exec \(expect) 'tssh' \(control) 'me@h'"))
+    }
+
+    @Test func scriptWithoutReuseJustExecs() {
+        let session = RemoteManagedSession(argv: ["sftp", "h"], keychainAccount: "a", autoPassword: false, acceptHostKey: true)
+        #expect(RemoteCommand.script(for: .managed(session), scriptPath: { "/s.exp" }, service: "svc")
+            == "exec '/usr/bin/expect' '-f' '/s.exp' 'svc' 'a' '0' 'accept' '--' 'sftp' 'h'")
+        #expect(RemoteCommand.script(for: .custom("tjump"), scriptPath: { "" }) == "exec tjump")
+        #expect(RemoteCommand.loginShell(script: "exec tjump", shell: "/bin/zsh") == "'/bin/zsh' -l -c 'exec tjump'")
+    }
+
+    @Test func reuseMinutesIsSaved() {
+        let hosts = [RemoteHost(name: "a", host: "h", reuseMinutes: 240)]
+        let text = RemoteHostStore.render(hosts)
+        #expect(text.contains("\"reuseMinutes\": 240"))
+        #expect(RemoteHostStore.parse(Data(text.utf8)) == .loaded(hosts))
     }
 }

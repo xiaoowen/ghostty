@@ -48,6 +48,11 @@ struct RemoteHost: Codable, Hashable, Identifiable {
     /// Fill the first password prompt from the Keychain. Defaults to on.
     var autoPassword: Bool?
 
+    /// Minutes a logged-in connection stays reusable after its last session
+    /// closes; new SSH/SFTP sessions in that time skip the password and MFA.
+    /// 0 turns reuse off. Defaults to 60. See `RemoteMux`.
+    var reuseMinutes: Int?
+
     var id: String { name }
 }
 
@@ -69,6 +74,10 @@ struct RemoteManagedSession: Equatable {
 
     var autoPassword: Bool
     var acceptHostKey: Bool
+
+    /// The reusable connection to log in through first, if any. `argv`
+    /// already points at it.
+    var mux: RemoteMuxPlan? = nil
 }
 
 extension RemoteHost {
@@ -103,22 +112,48 @@ extension RemoteHost {
             argv = ["sftp"]
             if let port { argv += ["-P", String(port)] }
         }
-        argv.append(Self.trimmed(user).map { "\($0)@\(host)" } ?? host)
+
+        let mux = muxPlan
+        if let mux { argv += mux.clientOptions }
+        argv.append(destination ?? host)
 
         return .managed(RemoteManagedSession(
             argv: argv,
             keychainAccount: name,
             autoPassword: autoPassword ?? true,
-            acceptHostKey: acceptHostKey ?? false
+            acceptHostKey: acceptHostKey ?? false,
+            mux: mux
         ))
     }
 
-    /// What a session runs, for tooltips and the command palette.
+    /// `user@host`, or `host` without a user. Nil for command-only hosts.
+    var destination: String? {
+        guard let host = Self.trimmed(host) else { return nil }
+        return Self.trimmed(user).map { "\($0)@\(host)" } ?? host
+    }
+
+    /// The reusable connection for structured sessions, or nil when reuse is
+    /// off or the host only has custom commands.
+    var muxPlan: RemoteMuxPlan? {
+        let minutes = reuseMinutes ?? RemoteMux.defaultMinutes
+        guard minutes > 0, let destination else { return nil }
+        return RemoteMux.plan(destination: destination, port: port, minutes: minutes)
+    }
+
+    /// What a session runs, for tooltips and the command palette. The
+    /// control socket option is left out; it's noise there.
     func displayCommand(for kind: RemoteSessionKind) -> String? {
         switch launch(for: kind) {
-        case .custom(let command): command
-        case .managed(let session): session.argv.joined(separator: " ")
-        case nil: nil
+        case .custom(let command):
+            return command
+        case .managed(let session):
+            var argv = session.argv
+            if let mux = session.mux, let index = argv.firstIndex(of: mux.clientOptions[1]) {
+                argv.removeSubrange((index - 1)...index)
+            }
+            return argv.joined(separator: " ")
+        case nil:
+            return nil
         }
     }
 
@@ -151,6 +186,9 @@ extension RemoteHost {
         }
         if let client = Self.trimmed(sshClient), !Self.supportedSSHClients.contains(client) {
             return "\(label)的 sshClient 只能是 tssh 或 ssh"
+        }
+        if let reuseMinutes, !(0...1440).contains(reuseMinutes) {
+            return "\(label)的 reuseMinutes 必须在 0–1440 之间"
         }
         return nil
     }
@@ -228,6 +266,39 @@ enum RemoteCommand {
             ] + session.argv
             return args.map(quote).joined(separator: " ")
         }
+    }
+
+    /// The whole script a surface runs for `launch`. It `exec`s the session;
+    /// with a reusable connection it first logs in through the master unless
+    /// one is already up.
+    static func script(
+        for launch: RemoteLaunch,
+        scriptPath: () throws -> String,
+        service: String = RemoteKeychain.service
+    ) rethrows -> String {
+        let session = "exec " + (try command(for: launch, scriptPath: scriptPath, service: service))
+        guard case .managed(let managed) = launch, let mux = managed.mux else { return session }
+
+        var master = managed
+        master.argv = mux.masterArgv
+        master.mux = nil
+        let login = try command(for: .managed(master), scriptPath: scriptPath, service: service)
+        let check = mux.checkArgv.map(quote).joined(separator: " ")
+
+        func notice(_ text: String) -> String {
+            "printf '\\033[2m%s\\033[0m\\r\\n' " + quote("[Ghostty] " + text)
+        }
+
+        return "if \(check) >/dev/null 2>&1; then "
+            + notice("复用已登录的连接") + "; "
+            + "else \(login) || exit $?; "
+            + notice("已登录。\(mux.minutes) 分钟内新开的 SSH/SFTP 会复用这条连接，不用再验证") + "; "
+            + "fi; \(session)"
+    }
+
+    /// Runs a complete `script` in the user's login shell; see `loginShell(_:)`.
+    static func loginShell(script: String, shell: String = userShell) -> String {
+        "\(quote(shell)) -l -c \(quote(script))"
     }
 
     /// Wraps `command` so it runs inside the user's login shell.
@@ -393,6 +464,7 @@ final class RemoteHostStore {
             if let v = host.dragFile { fields.append(("dragFile", String(v))) }
             if let v = host.acceptHostKey { fields.append(("acceptHostKey", String(v))) }
             if let v = host.autoPassword { fields.append(("autoPassword", String(v))) }
+            if let v = host.reuseMinutes { fields.append(("reuseMinutes", String(v))) }
             let body = fields.map { "      \"\($0.0)\": \($0.1)" }.joined(separator: ",\n")
             return "    {\n\(body)\n    }"
         }

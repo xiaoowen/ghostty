@@ -6,9 +6,12 @@ enum RemoteLauncher {
         guard let launch = host.launch(for: kind) else { return }
         guard let ghostty = (NSApp.delegate as? AppDelegate)?.ghostty else { return }
 
-        let command: String
+        let script: String
         do {
-            command = try RemoteCommand.command(for: launch) {
+            if case .managed(let session) = launch, session.mux != nil {
+                try RemoteMux.ensureDirectory()
+            }
+            script = try RemoteCommand.script(for: launch) {
                 try RemoteScript.install().path
             }
         } catch {
@@ -20,7 +23,7 @@ enum RemoteLauncher {
         }
 
         var config = Ghostty.SurfaceConfiguration()
-        config.command = RemoteCommand.loginShell(command)
+        config.command = RemoteCommand.loginShell(script: script)
 
         // Keep the tab around after the session ends so a failed login or a
         // dropped connection can still be read. (Setting a command already

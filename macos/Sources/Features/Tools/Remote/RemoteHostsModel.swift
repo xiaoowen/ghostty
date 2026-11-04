@@ -23,6 +23,9 @@ final class RemoteHostsModel: ObservableObject {
     /// Names of hosts with a saved password.
     @Published private(set) var savedPasswords: Set<String> = []
 
+    /// Names of hosts whose reusable logged-in connection is up.
+    @Published private(set) var loggedIn: Set<String> = []
+
     let store: RemoteHostStore
     private let keychain: Keychain
 
@@ -40,6 +43,13 @@ final class RemoteHostsModel: ObservableObject {
     func refresh() {
         state = store.state
         savedPasswords = Set(hosts.filter(\.usesKeychainPassword).map(\.name).filter(keychain.hasPassword))
+        loggedIn = Set(hosts.filter { $0.muxPlan.map(RemoteMux.isActive) ?? false }.map(\.name))
+    }
+
+    /// Closes a host's reusable connection and the sessions using it.
+    func disconnect(_ host: RemoteHost) {
+        if let plan = host.muxPlan { RemoteMux.disconnect(plan) }
+        refresh()
     }
 
     /// Saves `host`, replacing the host named `original` (nil adds a new
