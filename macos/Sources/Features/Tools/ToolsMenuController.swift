@@ -1,10 +1,11 @@
 import AppKit
 
-/// The 「工具」 menu, starting with keep-awake.
+/// The 「工具」 menu: keep-awake and remote host sessions.
 ///
 /// The same tools are offered in the main menu, the Dock menu and the command
-/// palette. All of them are built on demand from `KeepAwake.shared`, so they
-/// always show the current state (the checkmark, the remaining time).
+/// palette. All three are built on demand from `KeepAwake.shared` and
+/// `RemoteHostStore.shared`, so they always show the current state (the
+/// checkmark, the remaining time, the host list as it is on disk).
 final class ToolsMenuController: NSObject, NSMenuDelegate {
     static let shared = ToolsMenuController()
 
@@ -16,9 +17,14 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
 
     let menu = NSMenu(title: "工具")
     private let keepAwake: KeepAwake
+    private let hosts: RemoteHostStore
 
-    init(keepAwake: KeepAwake = .shared) {
+    init(
+        keepAwake: KeepAwake = .shared,
+        hosts: RemoteHostStore = .shared
+    ) {
         self.keepAwake = keepAwake
+        self.hosts = hosts
         super.init()
         menu.delegate = self
     }
@@ -54,8 +60,8 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
     }
 
     /// Answers key equivalent lookups without repopulating the menu. Without
-    /// this AppKit calls `menuNeedsUpdate` (rebuilding every item) for every
-    /// unbound shortcut typed in a terminal. AppKit still
+    /// this AppKit calls `menuNeedsUpdate` (re-reading the hosts file) for
+    /// every unbound shortcut typed in a terminal. AppKit still
     /// searches the existing items after a `false`; ⌃⌘A is answered here
     /// explicitly so it doesn't depend on that.
     func menuHasKeyEquivalent(
@@ -85,7 +91,13 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
     // MARK: Menu items
 
     private func makeItems(forDock: Bool) -> [NSMenuItem] {
-        [keepAwakeToggleItem(withShortcut: !forDock), keepAwakeTimerItem()]
+        var items = [keepAwakeToggleItem(withShortcut: !forDock), keepAwakeTimerItem()]
+        items.append(.separator())
+        items += RemoteSessionKind.allCases.map(remoteItem)
+        if !forDock {
+            items.append(editHostsItem())
+        }
+        return items
     }
 
     private func keepAwakeToggleItem(withShortcut: Bool) -> NSMenuItem {
@@ -147,6 +159,48 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
         return item
     }
 
+    private func remoteItem(_ kind: RemoteSessionKind) -> NSMenuItem {
+        let submenu = NSMenu(title: kind.menuTitle)
+
+        switch hosts.state {
+        case .missing:
+            submenu.addItem(Self.disabledItem("尚未配置主机"))
+        case .invalid(let message):
+            submenu.addItem(Self.disabledItem("主机列表有误：\(message)"))
+        case .loaded(let list):
+            let usable = list.filter { $0.command(for: kind) != nil }
+            if usable.isEmpty {
+                submenu.addItem(Self.disabledItem("没有配置 \(kind.label) 命令的主机"))
+            }
+            for host in usable {
+                let item = NSMenuItem(title: host.name, action: #selector(openRemote(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = RemoteMenuTarget(host: host, kind: kind)
+                item.toolTip = host.command(for: kind)
+                submenu.addItem(item)
+            }
+        }
+
+        let item = NSMenuItem(title: submenu.title, action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        item.setImageIfDesired(systemSymbolName: kind.symbolName)
+        return item
+    }
+
+    private func editHostsItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "编辑主机列表…", action: #selector(editHosts(_:)), keyEquivalent: "")
+        item.target = self
+        item.toolTip = hosts.fileURL.path
+        item.setImageIfDesired(systemSymbolName: "pencil")
+        return item
+    }
+
+    private static func disabledItem(_ title: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
+    }
+
     // MARK: Command palette
 
     /// Tool commands for the terminal command palette.
@@ -185,6 +239,27 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
             })
         }
 
+        for host in hosts.hosts {
+            for kind in RemoteSessionKind.allCases {
+                guard let command = host.command(for: kind) else { continue }
+                options.append(CommandOption(
+                    title: "\(kind.label)：\(host.name)",
+                    subtitle: command,
+                    leadingIcon: kind.symbolName
+                ) {
+                    RemoteLauncher.open(host, kind: kind)
+                })
+            }
+        }
+
+        options.append(CommandOption(
+            title: "远程主机：编辑列表",
+            subtitle: (hosts.fileURL.path as NSString).abbreviatingWithTildeInPath,
+            leadingIcon: "pencil"
+        ) { [weak self] in
+            self?.editHostList()
+        })
+
         return options
     }
 
@@ -206,4 +281,41 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
     @objc private func togglePreventSystemSleep(_ sender: Any?) {
         keepAwake.preventSystemSleep.toggle()
     }
+
+    @objc private func openRemote(_ sender: NSMenuItem) {
+        guard let target = sender.representedObject as? RemoteMenuTarget else { return }
+        RemoteLauncher.open(target.host, kind: target.kind)
+    }
+
+    @objc private func editHosts(_ sender: Any?) {
+        editHostList()
+    }
+
+    /// Opens `remote-hosts.json` in an editor, creating it from a template
+    /// the first time.
+    func editHostList() {
+        let url: URL
+        do {
+            url = try hosts.ensureFileExists()
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "无法创建主机列表"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+            return
+        }
+
+        let workspace = NSWorkspace.shared
+        if let editor = workspace.defaultApplicationURL(forExtension: url.pathExtension)
+            ?? workspace.defaultTextEditor {
+            workspace.open([url], withApplicationAt: editor, configuration: NSWorkspace.OpenConfiguration())
+        } else {
+            workspace.open(url)
+        }
+    }
+}
+
+private struct RemoteMenuTarget {
+    let host: RemoteHost
+    let kind: RemoteSessionKind
 }
