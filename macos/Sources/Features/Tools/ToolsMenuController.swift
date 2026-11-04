@@ -19,12 +19,22 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
     private let keepAwake: KeepAwake
     private let hosts: RemoteHostStore
 
+    /// Whether a Keychain password is saved for a host name.
+    private let passwordSaved: (String) -> Bool
+
+    /// Shows the dialog that saves a host's password.
+    private let promptForPassword: (RemoteHost) -> Void
+
     init(
         keepAwake: KeepAwake = .shared,
-        hosts: RemoteHostStore = .shared
+        hosts: RemoteHostStore = .shared,
+        passwordSaved: @escaping (String) -> Bool = { RemoteKeychain.hasPassword(account: $0) },
+        promptForPassword: @escaping (RemoteHost) -> Void = RemotePasswordPrompt.run(for:)
     ) {
         self.keepAwake = keepAwake
         self.hosts = hosts
+        self.passwordSaved = passwordSaved
+        self.promptForPassword = promptForPassword
         super.init()
         menu.delegate = self
     }
@@ -60,8 +70,8 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
     }
 
     /// Answers key equivalent lookups without repopulating the menu. Without
-    /// this AppKit calls `menuNeedsUpdate` (re-reading the hosts file) for
-    /// every unbound shortcut typed in a terminal. AppKit still
+    /// this AppKit calls `menuNeedsUpdate` (re-reading the hosts file and the
+    /// Keychain) for every unbound shortcut typed in a terminal. AppKit still
     /// searches the existing items after a `false`; ⌃⌘A is answered here
     /// explicitly so it doesn't depend on that.
     func menuHasKeyEquivalent(
@@ -96,6 +106,7 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
         items += RemoteSessionKind.allCases.map(remoteItem)
         if !forDock {
             items.append(editHostsItem())
+            items.append(passwordsItem())
         }
         return items
     }
@@ -168,15 +179,15 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
         case .invalid(let message):
             submenu.addItem(Self.disabledItem("主机列表有误：\(message)"))
         case .loaded(let list):
-            let usable = list.filter { $0.command(for: kind) != nil }
+            let usable = list.filter { $0.launch(for: kind) != nil }
             if usable.isEmpty {
-                submenu.addItem(Self.disabledItem("没有配置 \(kind.label) 命令的主机"))
+                submenu.addItem(Self.disabledItem("没有可用于 \(kind.label) 的主机"))
             }
             for host in usable {
                 let item = NSMenuItem(title: host.name, action: #selector(openRemote(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = RemoteMenuTarget(host: host, kind: kind)
-                item.toolTip = host.command(for: kind)
+                item.toolTip = host.displayCommand(for: kind)
                 submenu.addItem(item)
             }
         }
@@ -192,6 +203,34 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
         item.target = self
         item.toolTip = hosts.fileURL.path
         item.setImageIfDesired(systemSymbolName: "pencil")
+        return item
+    }
+
+    /// Hosts whose sessions fill the password from the Keychain, with whether
+    /// one is saved. Selecting a host opens the save/replace/delete dialog.
+    private func passwordsItem() -> NSMenuItem {
+        let submenu = NSMenu(title: "主机密码")
+        let hostsWithPasswords = hosts.hosts.filter(\.usesKeychainPassword)
+        if hostsWithPasswords.isEmpty {
+            submenu.addItem(Self.disabledItem("没有需要自动填密码的主机"))
+        }
+        for host in hostsWithPasswords {
+            let saved = passwordSaved(host.name)
+            let item = NSMenuItem(
+                title: "\(host.name)\(saved ? "" : "（未保存）")…",
+                action: #selector(editPassword(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.state = saved ? .on : .off
+            item.representedObject = host
+            submenu.addItem(item)
+        }
+
+        let item = NSMenuItem(title: submenu.title, action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        item.toolTip = "保存在登录钥匙串中，服务名 \(RemoteKeychain.service)"
+        item.setImageIfDesired(systemSymbolName: "key")
         return item
     }
 
@@ -241,13 +280,24 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
 
         for host in hosts.hosts {
             for kind in RemoteSessionKind.allCases {
-                guard let command = host.command(for: kind) else { continue }
+                guard let command = host.displayCommand(for: kind) else { continue }
                 options.append(CommandOption(
                     title: "\(kind.label)：\(host.name)",
                     subtitle: command,
                     leadingIcon: kind.symbolName
                 ) {
                     RemoteLauncher.open(host, kind: kind)
+                })
+            }
+
+            if host.usesKeychainPassword {
+                let promptForPassword = promptForPassword
+                options.append(CommandOption(
+                    title: "主机密码：\(host.name)",
+                    subtitle: passwordSaved(host.name) ? "已保存在钥匙串" : "未保存",
+                    leadingIcon: "key"
+                ) {
+                    promptForPassword(host)
                 })
             }
         }
@@ -285,6 +335,11 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
     @objc private func openRemote(_ sender: NSMenuItem) {
         guard let target = sender.representedObject as? RemoteMenuTarget else { return }
         RemoteLauncher.open(target.host, kind: target.kind)
+    }
+
+    @objc private func editPassword(_ sender: NSMenuItem) {
+        guard let host = sender.representedObject as? RemoteHost else { return }
+        promptForPassword(host)
     }
 
     @objc private func editHosts(_ sender: Any?) {

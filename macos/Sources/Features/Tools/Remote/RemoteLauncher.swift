@@ -3,8 +3,21 @@ import AppKit
 /// Opens SSH/SFTP sessions for remote hosts in new terminal tabs.
 enum RemoteLauncher {
     static func open(_ host: RemoteHost, kind: RemoteSessionKind) {
-        guard let command = host.command(for: kind) else { return }
+        guard let launch = host.launch(for: kind) else { return }
         guard let ghostty = (NSApp.delegate as? AppDelegate)?.ghostty else { return }
+
+        let command: String
+        do {
+            command = try RemoteCommand.command(for: launch) {
+                try RemoteScript.install().path
+            }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "无法准备远程连接脚本"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+            return
+        }
 
         var config = Ghostty.SurfaceConfiguration()
         config.command = RemoteCommand.loginShell(command)
