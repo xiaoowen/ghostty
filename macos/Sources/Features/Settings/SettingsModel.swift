@@ -22,6 +22,10 @@ final class SettingsModel: ObservableObject {
 
         /// Problems in the configuration Ghostty is currently running with.
         var configErrors: () -> [String] = { [] }
+
+        /// The terminal background and foreground Ghostty is running with,
+        /// used to paint the window when the theme isn't known.
+        var configColors: () -> (background: ThemeColor, foreground: ThemeColor)? = { nil }
     }
 
     /// Values in `gui.ghostty`, i.e. set from this window.
@@ -41,6 +45,9 @@ final class SettingsModel: ObservableObject {
 
     /// Errors in the loaded configuration, including ones not caused here.
     @Published private(set) var configErrors: [String] = []
+
+    /// See `Environment.configColors`.
+    @Published private(set) var configColors: (background: ThemeColor, foreground: ThemeColor)?
 
     @Published private(set) var mainConfigURL: URL
 
@@ -68,6 +75,7 @@ final class SettingsModel: ObservableObject {
         baseline = ConfigText.values(in: mainText)
         includeMissing = !ConfigText.includesGUIFile(mainText, guiFilePath: guiConfigURL.path)
         configErrors = environment.configErrors()
+        configColors = environment.configColors()
 
         if pendingSave == nil {
             let guiText = (try? String(contentsOf: guiConfigURL, encoding: .utf8)) ?? ""

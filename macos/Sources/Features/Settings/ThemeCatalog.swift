@@ -16,6 +16,18 @@ struct ThemeColor: Hashable {
         blue = UInt8(value & 0xFF)
     }
 
+    init(red: UInt8, green: UInt8, blue: UInt8) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+    }
+
+    /// Whether text on this color should be dark, using the same formula as
+    /// Ghostty's `NSColor.isLightColor` (perceived luminance above 0.5).
+    var isLight: Bool {
+        (0.299 * Double(red) + 0.587 * Double(green) + 0.114 * Double(blue)) / 255 > 0.5
+    }
+
     /// Relative luminance (WCAG), 0 for black to 1 for white.
     var luminance: Double {
         func channel(_ c: UInt8) -> Double {

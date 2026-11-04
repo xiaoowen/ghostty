@@ -336,3 +336,42 @@ struct SettingsModelPhase5Tests {
         #expect(model.configErrors.isEmpty)
     }
 }
+
+@Suite
+struct SettingsAppearanceTests {
+    /// Must agree with NSColor.isLightColor (perceived luminance > 0.5),
+    /// which decides light/dark for the command palette.
+    @Test(arguments: [
+        ("282c34", false), // Ghostty default background
+        ("24273a", false), // Catppuccin Macchiato
+        ("eff1f5", true),  // Catppuccin Latte
+        ("fdf6e3", true),  // Solarized Light
+        ("808080", true),  // 0.502
+        ("7f7f7f", false), // 0.498
+    ])
+    func lightness(hex: String, light: Bool) {
+        #expect(ThemeColor(hex: hex)?.isLight == light)
+    }
+
+    @Test func configColorsRefresh() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("SettingsAppearanceTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let main = dir.appendingPathComponent("config.ghostty")
+
+        var colors: (background: ThemeColor, foreground: ThemeColor)? = nil
+        let model = SettingsModel(environment: .init(
+            mainConfigURL: { main },
+            validate: { _ in [] },
+            reload: {},
+            loadThemes: { [] },
+            configColors: { colors }
+        ))
+        #expect(model.configColors == nil)
+
+        colors = (ThemeColor(red: 1, green: 2, blue: 3), ThemeColor(red: 4, green: 5, blue: 6))
+        model.refresh()
+        #expect(model.configColors?.background == ThemeColor(red: 1, green: 2, blue: 3))
+        #expect(model.configColors?.foreground == ThemeColor(red: 4, green: 5, blue: 6))
+    }
+}

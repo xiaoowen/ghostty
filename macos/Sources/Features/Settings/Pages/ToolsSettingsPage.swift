@@ -23,11 +23,10 @@ struct ToolsSettingsPage: View {
     @State private var message: String?
 
     var body: some View {
-        Form {
+        VStack(alignment: .leading, spacing: 22) {
             keepAwakeSection
             hostsSection
         }
-        .formStyle(.grouped)
         .onAppear { hosts.refresh() }
         .sheet(item: $editing) { item in
             HostEditor(
@@ -58,55 +57,85 @@ struct ToolsSettingsPage: View {
     // MARK: Keep-awake
 
     private var keepAwakeSection: some View {
-        Section {
-            LabeledContent("状态") {
-                HStack(spacing: 10) {
+        SettingsSection("防息屏") {
+            HStack(spacing: 12) {
+                IconTile(
+                    symbol: keepAwake.isOn ? "cup.and.saucer.fill" : "cup.and.saucer",
+                    colors: keepAwake.isOn ? SettingsPage.tools.tileColors : [Color(white: 0.6), Color(white: 0.45)],
+                    size: 36
+                )
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(keepAwake.isOn ? "防息屏已开启" : "防息屏未开启")
+                        .font(.system(size: 14, weight: .semibold))
                     TimelineView(.periodic(from: .now, by: 30)) { _ in
-                        Text(keepAwake.isOn ? "已开启 · \(keepAwake.remainingText ?? "")" : "未开启")
+                        Text(statusDetail)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    Button(keepAwake.isOn ? "关闭" : "开启") { keepAwake.toggle() }
                 }
+                Spacer(minLength: 12)
+                Button(keepAwake.isOn ? "关闭" : "开启") { keepAwake.toggle() }
+                    .controlSize(.large)
             }
+            .padding(14)
 
-            Toggle("启动 Ghostty 时自动开启", isOn: $preferences.keepAwakeOnLaunch)
-                .toggleStyle(.switch)
-
-            Toggle(isOn: $keepAwake.preventSystemSleep) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("同时阻止系统休眠")
-                    Text("额外传入 caffeinate -i；合上屏幕仍会休眠")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            SettingsDivider()
+            SettingsRow(title: "启动 Ghostty 时自动开启") {
+                Toggle("启动 Ghostty 时自动开启", isOn: $preferences.keepAwakeOnLaunch)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
             }
-            .toggleStyle(.switch)
-
-            LabeledContent {
+            SettingsDivider()
+            SettingsRow(title: "同时阻止系统休眠", note: "额外传入 caffeinate -i；合上屏幕仍会休眠") {
+                Toggle("同时阻止系统休眠", isOn: $keepAwake.preventSystemSleep)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+            SettingsDivider()
+            SettingsRow(title: "快捷键", note: "和 Ghostty 的 keybind 冲突时以 keybind 为准") {
                 ShortcutRecorder(shortcut: $preferences.keepAwakeShortcut, defaultShortcut: .keepAwakeDefault)
-            } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("快捷键")
-                    Text("和 Ghostty 的 keybind 冲突时以 keybind 为准")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
-        } header: {
-            Text("防息屏")
         }
+    }
+
+    private var statusDetail: String {
+        guard keepAwake.isOn else { return "显示器按系统设置休眠" }
+        if let remaining = keepAwake.remainingText, keepAwake.endDate != nil {
+            return "\(remaining) · caffeinate -d\(keepAwake.preventSystemSleep ? " -i" : "")"
+        }
+        return "直到关闭或 Ghostty 退出 · caffeinate -d\(keepAwake.preventSystemSleep ? " -i" : "")"
     }
 
     // MARK: Hosts
 
+    private var isListBroken: Bool {
+        if case .invalid = hosts.state { return true }
+        return false
+    }
+
     private var hostsSection: some View {
-        Section {
+        SettingsSection(
+            "远程主机",
+            footer: "也可以从菜单栏「工具」、命令面板和 Dock 菜单连接。密码保存在登录钥匙串（服务名 \(RemoteKeychain.service)）。"
+        ) {
             if case .invalid(let error) = hosts.state {
-                Label("主机列表有误：\(error)", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
+                SettingsBanner(symbol: "exclamationmark.triangle.fill", tint: .orange, text: "主机列表有误：\(error)")
+                    .padding(12)
+                SettingsDivider()
             } else if hosts.hosts.isEmpty {
-                Text("还没有主机。")
-                    .foregroundStyle(.secondary)
+                VStack(spacing: 6) {
+                    Image(systemName: "server.rack")
+                        .font(.system(size: 26))
+                        .foregroundStyle(.secondary)
+                    Text("还没有主机")
+                        .font(.system(size: 13, weight: .medium))
+                    Text("添加堡垒机后，可以一键打开 SSH 或 SFTP 标签页")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 22)
+                SettingsDivider()
             }
 
             ForEach(hosts.hosts) { host in
@@ -116,17 +145,25 @@ struct ToolsSettingsPage: View {
                     onEdit: { editing = EditingHost(host: host, original: host.name) },
                     onDelete: { deleting = host }
                 )
+                SettingsDivider()
             }
 
             if let message {
-                Text(message).foregroundColor(.red)
+                Text(message)
+                    .font(.callout)
+                    .foregroundColor(.red)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                SettingsDivider()
             }
 
             HStack {
-                Button("添加主机…") {
+                Button {
                     editing = EditingHost(host: RemoteHost(name: ""), original: nil)
+                } label: {
+                    Label("添加主机…", systemImage: "plus")
                 }
-                .disabled({ if case .invalid = hosts.state { return true } else { return false } }())
+                .disabled(isListBroken)
                 Spacer()
                 Button("编辑 \(hosts.store.fileURL.lastPathComponent)…") {
                     _ = try? hosts.store.ensureFileExists()
@@ -134,12 +171,8 @@ struct ToolsSettingsPage: View {
                 }
                 .buttonStyle(.link)
             }
-        } header: {
-            Text("远程主机")
-        } footer: {
-            Text("也可以从菜单栏「工具」、命令面板和 Dock 菜单连接。密码保存在登录钥匙串（服务名 \(RemoteKeychain.service)）。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
         }
     }
 }
@@ -157,12 +190,36 @@ private struct HostRow: View {
     let onEdit: () -> Void
     let onDelete: () -> Void
 
+    private var isCustom: Bool {
+        RemoteSessionKind.allCases.contains { host.customCommand(for: $0) != nil }
+    }
+
     var body: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(host.name).fontWeight(.medium)
+        HStack(spacing: 12) {
+            IconTile(
+                symbol: isCustom ? "terminal.fill" : "server.rack",
+                colors: isCustom
+                    ? [Color(red: 0.55, green: 0.55, blue: 0.62), Color(red: 0.36, green: 0.36, blue: 0.44)]
+                    : [Color(red: 0.36, green: 0.62, blue: 0.98), Color(red: 0.24, green: 0.38, blue: 0.86)],
+                size: 30
+            )
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(host.name).font(.system(size: 13, weight: .semibold))
+                    if host.usesKeychainPassword {
+                        CapsuleLabel(
+                            text: passwordSaved ? "已存密码" : "未存密码",
+                            symbol: passwordSaved ? "key.fill" : "key",
+                            tint: passwordSaved ? .green : .orange
+                        )
+                    }
+                    if isCustom {
+                        CapsuleLabel(text: "自定义命令")
+                    }
+                }
                 Text(host.displayCommand(for: .ssh) ?? host.displayCommand(for: .sftp) ?? "")
-                    .font(.caption)
+                    .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -170,25 +227,30 @@ private struct HostRow: View {
 
             Spacer(minLength: 8)
 
-            if host.usesKeychainPassword {
-                Label(passwordSaved ? "已存密码" : "未存密码", systemImage: passwordSaved ? "key.fill" : "key")
-                    .font(.caption)
-                    .foregroundColor(passwordSaved ? .secondary : .orange)
-            }
-
             ForEach(RemoteSessionKind.allCases, id: \.self) { kind in
-                Button(kind.label) { RemoteLauncher.open(host, kind: kind) }
-                    .disabled(host.launch(for: kind) == nil)
-                    .help(host.displayCommand(for: kind) ?? "")
+                Button {
+                    RemoteLauncher.open(host, kind: kind)
+                } label: {
+                    Label(kind.label, systemImage: kind.symbolName)
+                }
+                .disabled(host.launch(for: kind) == nil)
+                .help(host.displayCommand(for: kind) ?? "")
             }
 
-            Button(action: onEdit) { Image(systemName: "pencil") }
-                .buttonStyle(.borderless)
-                .help("编辑")
-            Button(action: onDelete) { Image(systemName: "trash") }
-                .buttonStyle(.borderless)
-                .help("删除")
+            Menu {
+                Button("编辑…", action: onEdit)
+                Divider()
+                Button("删除…", role: .destructive, action: onDelete)
+            } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("更多")
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 }
 

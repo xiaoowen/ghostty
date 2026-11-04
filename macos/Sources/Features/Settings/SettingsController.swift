@@ -17,14 +17,18 @@ final class SettingsController: NSWindowController, NSWindowDelegate {
         model = SettingsModel(environment: .live)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 780, height: 560),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 660),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         window.title = "设置"
+        // The content (painted in the terminal theme's colors) runs under a
+        // transparent titlebar, like the terminal windows themselves.
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false
-        window.contentMinSize = NSSize(width: 720, height: 480)
+        window.contentMinSize = NSSize(width: 780, height: 540)
         window.contentView = NSHostingView(rootView: SettingsView(
             model: model,
             navigation: navigation,
@@ -119,9 +123,22 @@ extension SettingsModel.Environment {
             },
             configErrors: {
                 (NSApp.delegate as? AppDelegate)?.ghostty.config.errors ?? []
+            },
+            configColors: {
+                guard let config = (NSApp.delegate as? AppDelegate)?.ghostty.config.config,
+                      let background = configColor(config, "background"),
+                      let foreground = configColor(config, "foreground") else { return nil }
+                return (background, foreground)
             }
         )
     }
+}
+
+/// A color option of the running configuration.
+private func configColor(_ config: ghostty_config_t, _ key: String) -> ThemeColor? {
+    var color = ghostty_config_color_s()
+    guard ghostty_config_get(config, &color, key, UInt(key.lengthOfBytes(using: .utf8))) else { return nil }
+    return ThemeColor(red: color.r, green: color.g, blue: color.b)
 }
 
 /// Checks a config file with libghostty's own parser.

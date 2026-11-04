@@ -1,12 +1,15 @@
 import SwiftUI
 
-/// 窗口: titlebar, initial size, state restoration and padding.
+/// 窗口: titlebar, initial size, state restoration and padding, with a live
+/// preview on top.
 struct WindowSettingsPage: View {
     @ObservedObject var model: SettingsModel
 
     var body: some View {
-        Form {
-            Section {
+        VStack(alignment: .leading, spacing: 22) {
+            TerminalPreview(model: model)
+
+            SettingsSection("窗口") {
                 SettingRow(model: model, title: "标题栏样式", key: .macosTitlebarStyle, note: "对之后打开的窗口生效") {
                     Picker("标题栏样式", selection: stringBinding(.macosTitlebarStyle)) {
                         Text("透明").tag("transparent")
@@ -15,12 +18,13 @@ struct WindowSettingsPage: View {
                         Text("隐藏").tag("hidden")
                         extraOption(.macosTitlebarStyle, known: ["transparent", "native", "tabs", "hidden"])
                     }
+                    .pickerStyle(.segmented)
                     .labelsHidden()
                     .fixedSize()
                 }
-
+                SettingsDivider()
                 WindowSizeRow(model: model)
-
+                SettingsDivider()
                 SettingRow(model: model, title: "退出时保存窗口", key: .windowSaveState, note: "下次启动时恢复窗口和标签页") {
                     Picker("退出时保存窗口", selection: stringBinding(.windowSaveState)) {
                         Text("跟随系统设置").tag("default")
@@ -30,35 +34,29 @@ struct WindowSettingsPage: View {
                     .labelsHidden()
                     .fixedSize()
                 }
-            } header: {
-                Text("窗口")
             }
 
-            Section {
+            SettingsSection("内边距", footer: "单位是点。只对之后新建的窗口、标签页和分屏生效。") {
                 SettingRow(model: model, title: "左右", key: .windowPaddingX, note: paddingNote(.windowPaddingX)) {
                     PaddingControl(model: model, key: .windowPaddingX)
                 }
+                SettingsDivider()
                 SettingRow(model: model, title: "上下", key: .windowPaddingY, note: paddingNote(.windowPaddingY)) {
                     PaddingControl(model: model, key: .windowPaddingY)
                 }
+                SettingsDivider()
                 SettingRow(model: model, title: "平衡", key: .windowPaddingBalance, note: "把放不下一格的剩余空白分到四周") {
                     Picker("平衡", selection: stringBinding(.windowPaddingBalance)) {
                         Text("关闭").tag("false")
-                        Text("平衡（限制顶部）").tag("true")
+                        Text("平衡").tag("true")
                         Text("四边相等").tag("equal")
                     }
+                    .pickerStyle(.segmented)
                     .labelsHidden()
                     .fixedSize()
                 }
-            } header: {
-                Text("内边距")
-            } footer: {
-                Text("单位是点。只对之后新建的窗口、标签页和分屏生效。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
-        .formStyle(.grouped)
     }
 
     private func paddingNote(_ key: SettingKey) -> String? {
@@ -98,6 +96,7 @@ private struct PaddingControl: View {
         .frame(width: 180)
         Text("\(Int(points)) pt")
             .monospacedDigit()
+            .foregroundStyle(.secondary)
             .frame(width: 44, alignment: .trailing)
     }
 }
@@ -109,15 +108,19 @@ private struct WindowSizeRow: View {
     private var width: Int { Int(model.value(.windowWidth) ?? "0") ?? 0 }
     private var height: Int { Int(model.value(.windowHeight) ?? "0") ?? 0 }
     private var isCustom: Bool { width > 0 && height > 0 }
-    private var isOverridden: Bool { model.isOverridden(.windowWidth) || model.isOverridden(.windowHeight) }
 
     var body: some View {
-        LabeledContent {
+        SettingsRow(
+            title: "初始大小",
+            note: "以字符格计，只影响新窗口；超出屏幕会被缩小",
+            isModified: model.isOverridden(.windowWidth) || model.isOverridden(.windowHeight)
+        ) {
             HStack(spacing: 8) {
                 Picker("初始大小", selection: customBinding) {
                     Text("自动").tag(false)
                     Text("指定").tag(true)
                 }
+                .pickerStyle(.segmented)
                 .labelsHidden()
                 .fixedSize()
 
@@ -128,23 +131,7 @@ private struct WindowSizeRow: View {
                     Text("行").foregroundStyle(.secondary).fixedSize()
                 }
 
-                Button {
-                    model.reset(.windowWidth)
-                    model.reset(.windowHeight)
-                } label: {
-                    Image(systemName: "arrow.uturn.backward.circle.fill")
-                }
-                .buttonStyle(.borderless)
-                .help("恢复为 config.ghostty 中的值")
-                .opacity(isOverridden ? 1 : 0)
-                .disabled(!isOverridden)
-            }
-        } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("初始大小")
-                Text("以字符格计，只影响新窗口；超出屏幕会被缩小")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                SettingResetButton(model: model, keys: [.windowWidth, .windowHeight])
             }
         }
     }
@@ -168,7 +155,8 @@ private struct WindowSizeRow: View {
             TextField("", value: binding, format: .number)
                 .labelsHidden()
                 .multilineTextAlignment(.trailing)
-                .frame(width: 48)
+                .monospacedDigit()
+                .frame(width: 46)
             Stepper("", value: binding, in: range)
                 .labelsHidden()
         }
