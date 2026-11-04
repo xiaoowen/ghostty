@@ -360,13 +360,7 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
             return
         }
 
-        let workspace = NSWorkspace.shared
-        if let editor = workspace.defaultApplicationURL(forExtension: url.pathExtension)
-            ?? workspace.defaultTextEditor {
-            workspace.open([url], withApplicationAt: editor, configuration: NSWorkspace.OpenConfiguration())
-        } else {
-            workspace.open(url)
-        }
+        NSWorkspace.shared.openInTextEditor(url)
     }
 }
 

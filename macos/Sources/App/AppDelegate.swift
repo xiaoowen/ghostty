@@ -332,6 +332,9 @@ class AppDelegate: NSObject,
         // Tools menu (keep-awake, remote hosts) and its menu bar indicator.
         ToolsMenuController.shared.install()
 
+        // Preferences… (⌘,) opens the Settings window instead of the config file.
+        SettingsController.installMenuItems(preferences: menuOpenConfig)
+
         // Setup signal handlers
         setupSignals()
 
