@@ -63,8 +63,6 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
             ?? mainMenu.items.count
         mainMenu.insertItem(item, at: index)
 
-        KeepAwakeStatusItem.shared.start(observing: keepAwake)
-
         // AppKit also matches the items already in the menu, so a changed
         // shortcut must replace them right away, not when the menu next opens.
         // @Published fires before the value changes, hence the async hop.

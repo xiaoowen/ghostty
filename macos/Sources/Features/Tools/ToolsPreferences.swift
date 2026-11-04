@@ -82,6 +82,8 @@ final class ToolsPreferences: ObservableObject {
 
     private static let shortcutKey = "KeepAwakeShortcut"
     private static let onLaunchKey = "KeepAwakeOnLaunch"
+    private static let titlebarKeepAwakeKey = "TitlebarKeepAwakeVisible"
+    private static let titlebarRemoteHostsKey = "TitlebarRemoteHostsVisible"
 
     /// Toggles keep-awake. Nil means no shortcut.
     @Published var keepAwakeShortcut: ToolShortcut? {
@@ -95,6 +97,18 @@ final class ToolsPreferences: ObservableObject {
         didSet { defaults.set(keepAwakeOnLaunch, forKey: Self.onLaunchKey) }
     }
 
+    /// Show the keep-awake button at the right of terminal windows'
+    /// titlebars. On by default.
+    @Published var showsKeepAwakeInTitlebar: Bool {
+        didSet { defaults.set(showsKeepAwakeInTitlebar, forKey: Self.titlebarKeepAwakeKey) }
+    }
+
+    /// Show the remote hosts button at the right of terminal windows'
+    /// titlebars. On by default.
+    @Published var showsRemoteHostsInTitlebar: Bool {
+        didSet { defaults.set(showsRemoteHostsInTitlebar, forKey: Self.titlebarRemoteHostsKey) }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults) {
@@ -106,5 +120,7 @@ final class ToolsPreferences: ObservableObject {
             keepAwakeShortcut = .keepAwakeDefault
         }
         keepAwakeOnLaunch = defaults.bool(forKey: Self.onLaunchKey)
+        showsKeepAwakeInTitlebar = defaults.object(forKey: Self.titlebarKeepAwakeKey) as? Bool ?? true
+        showsRemoteHostsInTitlebar = defaults.object(forKey: Self.titlebarRemoteHostsKey) as? Bool ?? true
     }
 }

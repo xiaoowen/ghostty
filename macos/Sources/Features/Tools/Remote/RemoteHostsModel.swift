@@ -3,6 +3,16 @@ import Foundation
 /// Editing of `remote-hosts.json` and the hosts' Keychain passwords for the
 /// Tools page of the Settings window. Use from the main thread only.
 final class RemoteHostsModel: ObservableObject {
+    /// The model behind the titlebar buttons and the Settings window, kept
+    /// fresh so "已登录" follows connections expiring on their own.
+    static let shared: RemoteHostsModel = {
+        let model = RemoteHostsModel(store: .shared)
+        model.startAutoRefresh(every: 15)
+        return model
+    }()
+
+    private var refreshTimer: Timer?
+
     /// Keychain operations, injectable for tests.
     struct Keychain {
         var hasPassword: (String) -> Bool
@@ -33,6 +43,13 @@ final class RemoteHostsModel: ObservableObject {
         self.store = store
         self.keychain = keychain
         refresh()
+    }
+
+    func startAutoRefresh(every interval: TimeInterval) {
+        refreshTimer?.invalidate()
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.refresh()
+        }
     }
 
     var hosts: [RemoteHost] {

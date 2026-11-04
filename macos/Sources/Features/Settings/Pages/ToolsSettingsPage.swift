@@ -8,7 +8,7 @@ struct ToolsSettingsContext {
     var hosts: RemoteHostsModel
 
     static var live: Self {
-        Self(keepAwake: .shared, preferences: .shared, hosts: RemoteHostsModel(store: .shared))
+        Self(keepAwake: .shared, preferences: .shared, hosts: .shared)
     }
 }
 
@@ -82,6 +82,8 @@ struct ToolsSettingsPage: View {
             .padding(14)
 
             SettingsDivider()
+            titlebarRow(isOn: $preferences.showsKeepAwakeInTitlebar, note: "点图标开关防息屏，旁边的箭头打开定时与选项")
+            SettingsDivider()
             SettingsRow(title: "启动 Ghostty 时自动开启") {
                 Toggle("启动 Ghostty 时自动开启", isOn: $preferences.keepAwakeOnLaunch)
                     .labelsHidden()
@@ -97,6 +99,18 @@ struct ToolsSettingsPage: View {
             SettingsRow(title: "快捷键", note: "和 Ghostty 的 keybind 冲突时以 keybind 为准") {
                 ShortcutRecorder(shortcut: $preferences.keepAwakeShortcut, defaultShortcut: .keepAwakeDefault)
             }
+        }
+    }
+
+    /// "在窗口顶部栏显示", shared by the keep-awake and remote host sections.
+    private func titlebarRow(isOn: Binding<Bool>, note: String) -> some View {
+        SettingsRow(
+            title: "在窗口顶部栏显示",
+            note: note + "。标题栏样式为「标签页」或「隐藏」时不显示"
+        ) {
+            Toggle("在窗口顶部栏显示", isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
         }
     }
 
@@ -121,6 +135,9 @@ struct ToolsSettingsPage: View {
             footer: "也可以从菜单栏「工具」、命令面板和 Dock 菜单连接。密码保存在登录钥匙串（服务名 \(RemoteKeychain.service)）。"
                 + "开启复用登录的主机，登录一次后，新开的 SSH/SFTP 会复用这条连接，不再要求密码和 MFA。"
         ) {
+            titlebarRow(isOn: $preferences.showsRemoteHostsInTitlebar, note: "点图标打开主机列表，直接连接 SSH 或 SFTP")
+            SettingsDivider()
+
             if case .invalid(let error) = hosts.state {
                 SettingsBanner(symbol: "exclamationmark.triangle.fill", tint: .orange, text: "主机列表有误：\(error)")
                     .padding(12)

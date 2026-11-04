@@ -293,6 +293,20 @@ struct ToolsPreferencesTests {
         #expect(ToolsPreferences(defaults: store).keepAwakeShortcut == nil)
     }
 
+    @Test func titlebarButtonsAreShownUnlessTurnedOffSeparately() {
+        let store = defaults()
+        let preferences = ToolsPreferences(defaults: store)
+        #expect(preferences.showsKeepAwakeInTitlebar && preferences.showsRemoteHostsInTitlebar)
+
+        preferences.showsKeepAwakeInTitlebar = false
+        let reloaded = ToolsPreferences(defaults: store)
+        #expect(!reloaded.showsKeepAwakeInTitlebar)
+        #expect(reloaded.showsRemoteHostsInTitlebar)
+
+        reloaded.showsRemoteHostsInTitlebar = false
+        #expect(!ToolsPreferences(defaults: store).showsRemoteHostsInTitlebar)
+    }
+
     @Test func garbageFallsBackToDefault() {
         let store = defaults()
         store.set("nonsense", forKey: "KeepAwakeShortcut")
