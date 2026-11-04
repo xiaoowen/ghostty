@@ -10,6 +10,7 @@ final class SettingsController: NSWindowController, NSWindowDelegate {
     static let shared = SettingsController()
 
     let model: SettingsModel
+    let navigation = SettingsNavigation()
     private var configObserver: NSObjectProtocol?
 
     private init() {
@@ -24,7 +25,11 @@ final class SettingsController: NSWindowController, NSWindowDelegate {
         window.title = "设置"
         window.isReleasedWhenClosed = false
         window.contentMinSize = NSSize(width: 720, height: 480)
-        window.contentView = NSHostingView(rootView: SettingsView(model: model))
+        window.contentView = NSHostingView(rootView: SettingsView(
+            model: model,
+            navigation: navigation,
+            tools: .live
+        ))
         window.center()
         window.setFrameAutosaveName("GhosttySettingsWindow")
 
@@ -49,7 +54,9 @@ final class SettingsController: NSWindowController, NSWindowDelegate {
         if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
     }
 
-    func show() {
+    /// Shows the window, switching to `page` if given.
+    func show(page: SettingsPage? = nil) {
+        if let page { navigation.page = page }
         model.refresh()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
@@ -109,6 +116,9 @@ extension SettingsModel.Environment {
             },
             loadThemes: {
                 ThemeCatalog.load(from: ThemeCatalog.directories())
+            },
+            configErrors: {
+                (NSApp.delegate as? AppDelegate)?.ghostty.config.errors ?? []
             }
         )
     }

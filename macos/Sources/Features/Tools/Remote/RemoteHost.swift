@@ -353,6 +353,54 @@ final class RemoteHostStore {
         return Self.parse(data)
     }
 
+    struct SaveError: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    /// Replaces the file with `hosts`, after checking them like `parse` does.
+    /// Keys Ghostty doesn't know are not kept.
+    func save(_ hosts: [RemoteHost]) throws {
+        let text = Self.render(hosts)
+        if case .invalid(let message) = Self.parse(Data(text.utf8)) {
+            throw SaveError(message: message)
+        }
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try text.write(to: fileURL, atomically: true, encoding: .utf8)
+        cachedState = nil
+    }
+
+    /// Pretty JSON with keys in a fixed, readable order and unset fields left out.
+    static func render(_ hosts: [RemoteHost]) -> String {
+        func string(_ value: String) -> String {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.withoutEscapingSlashes]
+            return (try? encoder.encode(value)).map { String(decoding: $0, as: UTF8.self) } ?? "\"\""
+        }
+
+        let objects = hosts.map { host -> String in
+            var fields: [(String, String)] = [("name", string(host.name))]
+            if let v = host.sshCommand { fields.append(("sshCommand", string(v))) }
+            if let v = host.sftpCommand { fields.append(("sftpCommand", string(v))) }
+            if let v = host.host { fields.append(("host", string(v))) }
+            if let v = host.user { fields.append(("user", string(v))) }
+            if let v = host.port { fields.append(("port", String(v))) }
+            if let v = host.sshClient { fields.append(("sshClient", string(v))) }
+            if let v = host.zmodem { fields.append(("zmodem", String(v))) }
+            if let v = host.dragFile { fields.append(("dragFile", String(v))) }
+            if let v = host.acceptHostKey { fields.append(("acceptHostKey", String(v))) }
+            if let v = host.autoPassword { fields.append(("autoPassword", String(v))) }
+            let body = fields.map { "      \"\($0.0)\": \($0.1)" }.joined(separator: ",\n")
+            return "    {\n\(body)\n    }"
+        }
+
+        if objects.isEmpty { return "{\n  \"hosts\": []\n}\n" }
+        return "{\n  \"hosts\": [\n" + objects.joined(separator: ",\n") + "\n  ]\n}\n"
+    }
+
     static func parse(_ data: Data) -> State {
         let file: File
         do {

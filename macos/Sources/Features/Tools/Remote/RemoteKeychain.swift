@@ -81,6 +81,34 @@ enum RemoteKeychain {
         }
     }
 
+    /// Moves a saved password to a new account, e.g. when a host is renamed.
+    /// Does nothing if there's no password for `from`.
+    static func movePassword(from: String, to: String, service: String = service) throws {
+        guard from != to, hasPassword(account: from, service: service) else { return }
+        try setPassword(readPassword(account: from, service: service), account: to, service: service)
+        try deletePassword(account: from, service: service)
+    }
+
+    /// Reads a password with `/usr/bin/security`, the item's creator, so
+    /// there's no Keychain prompt. Only the service and account are arguments.
+    private static func readPassword(account: String, service: String) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = ["find-generic-password", "-s", service, "-a", account, "-w"]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw KeychainError.securityFailed("读取「\(account)」的密码失败")
+        }
+        var password = String(decoding: data, as: UTF8.self)
+        if password.hasSuffix("\n") { password.removeLast() }
+        return password
+    }
+
     /// Quoting for `security -i`'s command parser: double quotes, with `\`
     /// and `"` escaped by a backslash.
     static func quote(_ value: String) -> String {

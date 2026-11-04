@@ -13,6 +13,13 @@ enum SettingKey: String, CaseIterable {
     case fontSize = "font-size"
     case fontThicken = "font-thicken"
     case adjustCellHeight = "adjust-cell-height"
+    case macosTitlebarStyle = "macos-titlebar-style"
+    case windowWidth = "window-width"
+    case windowHeight = "window-height"
+    case windowSaveState = "window-save-state"
+    case windowPaddingX = "window-padding-x"
+    case windowPaddingY = "window-padding-y"
+    case windowPaddingBalance = "window-padding-balance"
 
     /// Ghostty's default, used when neither file sets the option. Nil means
     /// "unset" (e.g. no theme).
@@ -27,6 +34,11 @@ enum SettingKey: String, CaseIterable {
         case .fontSize: "13"
         case .fontThicken: "false"
         case .adjustCellHeight: "0%"
+        case .macosTitlebarStyle: "transparent"
+        case .windowWidth, .windowHeight: "0"
+        case .windowSaveState: "default"
+        case .windowPaddingX, .windowPaddingY: "2"
+        case .windowPaddingBalance: "false"
         }
     }
 

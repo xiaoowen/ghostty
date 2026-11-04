@@ -19,6 +19,9 @@ final class SettingsModel: ObservableObject {
 
         /// Loads the theme list. Called once, off the main thread.
         var loadThemes: () -> [ThemeInfo]
+
+        /// Problems in the configuration Ghostty is currently running with.
+        var configErrors: () -> [String] = { [] }
     }
 
     /// Values in `gui.ghostty`, i.e. set from this window.
@@ -35,6 +38,9 @@ final class SettingsModel: ObservableObject {
     @Published private(set) var saveError: String?
 
     @Published private(set) var themes: [ThemeInfo] = []
+
+    /// Errors in the loaded configuration, including ones not caused here.
+    @Published private(set) var configErrors: [String] = []
 
     @Published private(set) var mainConfigURL: URL
 
@@ -61,6 +67,7 @@ final class SettingsModel: ObservableObject {
         let mainText = (try? String(contentsOf: mainConfigURL, encoding: .utf8)) ?? ""
         baseline = ConfigText.values(in: mainText)
         includeMissing = !ConfigText.includesGUIFile(mainText, guiFilePath: guiConfigURL.path)
+        configErrors = environment.configErrors()
 
         if pendingSave == nil {
             let guiText = (try? String(contentsOf: guiConfigURL, encoding: .utf8)) ?? ""
@@ -170,6 +177,14 @@ final class SettingsModel: ObservableObject {
         let mainText = (try? String(contentsOf: mainConfigURL, encoding: .utf8)) ?? ""
         includeMissing = !ConfigText.includesGUIFile(mainText, guiFilePath: guiConfigURL.path)
         if !includeMissing { environment.reload() }
+    }
+
+    /// Saves pending changes and reloads Ghostty's configuration, e.g. after
+    /// editing config.ghostty by hand. `refresh()` follows via the
+    /// config-changed notification.
+    func reloadConfiguration() {
+        saveNow()
+        environment.reload()
     }
 
     /// Appends `config-file = ?gui.ghostty` to the main config and reloads.

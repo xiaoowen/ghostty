@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 
 /// The 「工具」 menu: keep-awake and remote host sessions.
 ///
@@ -9,15 +10,18 @@ import AppKit
 final class ToolsMenuController: NSObject, NSMenuDelegate {
     static let shared = ToolsMenuController()
 
-    /// Shortcut for toggling keep-awake (⌃⌘A). Ghostty keybinds still win,
-    /// since the terminal only passes unbound key equivalents to the menu.
-    static let keepAwakeKeyEquivalent = "a"
-    static let keepAwakeModifiers: NSEvent.ModifierFlags = [.control, .command]
-    static let keepAwakeSymbols = ["⌃", "⌘", "A"]
-
     let menu = NSMenu(title: "工具")
     private let keepAwake: KeepAwake
     private let hosts: RemoteHostStore
+
+    /// Includes the keep-awake shortcut (default ⌃⌘A). Ghostty keybinds still
+    /// win, since the terminal only passes unbound key equivalents to the menu.
+    private let preferences: ToolsPreferences
+
+    /// Opens the Settings window at the Tools page.
+    private let openToolSettings: () -> Void
+
+    private var shortcutObserver: AnyCancellable?
 
     /// Whether a Keychain password is saved for a host name.
     private let passwordSaved: (String) -> Bool
@@ -28,13 +32,17 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
     init(
         keepAwake: KeepAwake = .shared,
         hosts: RemoteHostStore = .shared,
+        preferences: ToolsPreferences = .shared,
         passwordSaved: @escaping (String) -> Bool = { RemoteKeychain.hasPassword(account: $0) },
-        promptForPassword: @escaping (RemoteHost) -> Void = RemotePasswordPrompt.run(for:)
+        promptForPassword: @escaping (RemoteHost) -> Void = RemotePasswordPrompt.run(for:),
+        openToolSettings: @escaping () -> Void = { SettingsController.shared.show(page: .tools) }
     ) {
         self.keepAwake = keepAwake
         self.hosts = hosts
+        self.preferences = preferences
         self.passwordSaved = passwordSaved
         self.promptForPassword = promptForPassword
+        self.openToolSettings = openToolSettings
         super.init()
         menu.delegate = self
     }
@@ -56,6 +64,22 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
         mainMenu.insertItem(item, at: index)
 
         KeepAwakeStatusItem.shared.start(observing: keepAwake)
+
+        // AppKit also matches the items already in the menu, so a changed
+        // shortcut must replace them right away, not when the menu next opens.
+        // @Published fires before the value changes, hence the async hop.
+        shortcutObserver = preferences.$keepAwakeShortcut
+            .dropFirst()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.rebuild(self.menu)
+                }
+            }
+
+        if preferences.keepAwakeOnLaunch && !keepAwake.isOn {
+            keepAwake.start(.indefinite)
+        }
     }
 
     /// Items to append to the Dock menu.
@@ -72,7 +96,7 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
     /// Answers key equivalent lookups without repopulating the menu. Without
     /// this AppKit calls `menuNeedsUpdate` (re-reading the hosts file and the
     /// Keychain) for every unbound shortcut typed in a terminal. AppKit still
-    /// searches the existing items after a `false`; ⌃⌘A is answered here
+    /// searches the existing items after a `false`; the shortcut is answered here
     /// explicitly so it doesn't depend on that.
     func menuHasKeyEquivalent(
         _ menu: NSMenu,
@@ -80,10 +104,9 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
         target: AutoreleasingUnsafeMutablePointer<AnyObject?>,
         action: UnsafeMutablePointer<Selector?>
     ) -> Bool {
-        let modifiers = event.modifierFlags.intersection([.shift, .control, .option, .command])
         guard menu === self.menu,
-              modifiers == Self.keepAwakeModifiers,
-              event.charactersIgnoringModifiers?.lowercased() == Self.keepAwakeKeyEquivalent else {
+              let shortcut = preferences.keepAwakeShortcut,
+              shortcut.matches(event) else {
             return false
         }
         target.pointee = self
@@ -107,6 +130,11 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
         if !forDock {
             items.append(editHostsItem())
             items.append(passwordsItem())
+            items.append(.separator())
+            let settings = NSMenuItem(title: "工具设置…", action: #selector(showToolSettings(_:)), keyEquivalent: "")
+            settings.target = self
+            settings.setImageIfDesired(systemSymbolName: "gearshape")
+            items.append(settings)
         }
         return items
     }
@@ -117,13 +145,14 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
             title += "（\(remaining)）"
         }
 
+        let shortcut = withShortcut ? preferences.keepAwakeShortcut : nil
         let item = NSMenuItem(
             title: title,
             action: #selector(toggleKeepAwake(_:)),
-            keyEquivalent: withShortcut ? Self.keepAwakeKeyEquivalent : ""
+            keyEquivalent: shortcut?.key ?? ""
         )
-        if withShortcut {
-            item.keyEquivalentModifierMask = Self.keepAwakeModifiers
+        if let shortcut {
+            item.keyEquivalentModifierMask = shortcut.modifiers
         }
         item.target = self
         item.state = keepAwake.isOn ? .on : .off
@@ -246,12 +275,13 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
     func paletteOptions() -> [CommandOption] {
         var options: [CommandOption] = []
         let keepAwake = keepAwake
+        let symbols = preferences.keepAwakeShortcut?.symbols
 
         if keepAwake.isOn {
             options.append(CommandOption(
                 title: "防息屏：关闭",
                 subtitle: keepAwake.remainingText.map { "已开启 · \($0)" },
-                symbols: Self.keepAwakeSymbols,
+                symbols: symbols,
                 leadingIcon: "cup.and.saucer.fill"
             ) {
                 keepAwake.stop()
@@ -265,7 +295,7 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
             options.append(CommandOption(
                 title: "防息屏：开启",
                 subtitle: "直到手动关闭或 Ghostty 退出",
-                symbols: Self.keepAwakeSymbols,
+                symbols: symbols,
                 leadingIcon: "cup.and.saucer"
             ) {
                 keepAwake.start(.indefinite)
@@ -310,10 +340,22 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
             self?.editHostList()
         })
 
+        options.append(CommandOption(
+            title: "工具：设置…",
+            subtitle: "防息屏、远程主机、快捷键",
+            leadingIcon: "gearshape"
+        ) { [weak self] in
+            self?.openToolSettings()
+        })
+
         return options
     }
 
     // MARK: Actions
+
+    @objc private func showToolSettings(_ sender: Any?) {
+        openToolSettings()
+    }
 
     @objc private func toggleKeepAwake(_ sender: Any?) {
         keepAwake.toggle()

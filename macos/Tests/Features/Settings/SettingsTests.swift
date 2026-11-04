@@ -289,3 +289,50 @@ struct SettingsFormatTests {
         #expect(SettingsFormat.percent(nil) == nil)
     }
 }
+
+@Suite
+struct SettingsModelPhase5Tests {
+    @Test func windowKeysRenderInOrderAfterFontKeys() {
+        let file = GUIConfigFile(values: [
+            .windowPaddingX: "8", .windowWidth: "120", .windowHeight: "36",
+            .macosTitlebarStyle: "tabs", .fontSize: "14", .windowPaddingBalance: "equal",
+        ])
+        #expect(file.render() == GUIConfigFile.header + """
+            font-size = 14
+            macos-titlebar-style = tabs
+            window-width = 120
+            window-height = 36
+            window-padding-x = 8
+            window-padding-balance = equal
+
+            """)
+        #expect(GUIConfigFile.parse(file.render()) == file)
+    }
+
+    @Test func configErrorsAndReload() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("SettingsModelPhase5Tests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let main = dir.appendingPathComponent("config.ghostty")
+        try "window-padding-x = 2,4\n".write(to: main, atomically: true, encoding: .utf8)
+
+        var errors = ["config.ghostty:1: unknown field"]
+        var reloads = 0
+        let model = SettingsModel(environment: .init(
+            mainConfigURL: { main },
+            validate: { _ in [] },
+            reload: { reloads += 1 },
+            loadThemes: { [] },
+            configErrors: { errors }
+        ))
+        #expect(model.configErrors == ["config.ghostty:1: unknown field"])
+        #expect(model.value(.windowPaddingX) == "2,4")
+        #expect(model.value(.windowSaveState) == "default")
+
+        errors = []
+        model.reloadConfiguration()
+        #expect(reloads == 1)
+        model.refresh()
+        #expect(model.configErrors.isEmpty)
+    }
+}

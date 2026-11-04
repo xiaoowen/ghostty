@@ -3,6 +3,9 @@ import SwiftUI
 enum SettingsPage: String, CaseIterable, Identifiable {
     case appearance
     case font
+    case window
+    case tools
+    case advanced
 
     var id: Self { self }
 
@@ -10,6 +13,9 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .appearance: "外观"
         case .font: "字体"
+        case .window: "窗口"
+        case .tools: "工具"
+        case .advanced: "高级"
         }
     }
 
@@ -18,26 +24,42 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .appearance: "paintpalette"
         // Not "textformat": its localized variant draws "格式" on Chinese systems.
         case .font: "f.cursive"
+        case .window: "macwindow"
+        case .tools: "wrench.and.screwdriver"
+        case .advanced: "gearshape.2"
         }
+    }
+}
+
+/// Which page the Settings window shows; lets other code open a page.
+final class SettingsNavigation: ObservableObject {
+    @Published var page: SettingsPage
+
+    init(page: SettingsPage = .appearance) {
+        self.page = page
     }
 }
 
 /// The Settings window's content: a sidebar of pages and the selected page.
 struct SettingsView: View {
     @ObservedObject var model: SettingsModel
+    @ObservedObject var navigation: SettingsNavigation
+    let tools: ToolsSettingsContext
 
-    @State private var page: SettingsPage?
-    @State private var confirmingResetAll = false
-
-    init(model: SettingsModel, page: SettingsPage = .appearance) {
+    init(model: SettingsModel, navigation: SettingsNavigation, tools: ToolsSettingsContext) {
         self.model = model
-        _page = State(initialValue: page)
+        self.navigation = navigation
+        self.tools = tools
     }
 
     var body: some View {
         HStack(spacing: 0) {
-            sidebar
-                .frame(width: 200)
+            List(SettingsPage.allCases, selection: selection) { page in
+                Label(page.title, systemImage: page.symbolName)
+                    .tag(page)
+            }
+            .listStyle(.sidebar)
+            .frame(width: 200)
 
             Divider()
 
@@ -50,48 +72,33 @@ struct SettingsView: View {
         .frame(minWidth: 720, minHeight: 480)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { model.loadThemesIfNeeded() }
-        .alert("恢复全部设置？", isPresented: $confirmingResetAll) {
-            Button("全部恢复", role: .destructive) { model.resetAll() }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("清空 gui.ghostty 中由设置页写入的全部修改，恢复为 config.ghostty 中的值。")
-        }
     }
 
-    private var sidebar: some View {
-        VStack(spacing: 0) {
-            List(SettingsPage.allCases, selection: $page) { page in
-                Label(page.title, systemImage: page.symbolName)
-                    .tag(page)
-            }
-            .listStyle(.sidebar)
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                Button("打开 \(model.mainConfigURL.lastPathComponent)…") {
-                    NSWorkspace.shared.openInTextEditor(model.mainConfigURL)
-                }
-                Button("打开 \(GUIConfigFile.fileName)…") {
-                    NSWorkspace.shared.openInTextEditor(model.guiConfigURL)
-                }
-                .disabled(!FileManager.default.fileExists(atPath: model.guiConfigURL.path))
-                Button("全部恢复…") { confirmingResetAll = true }
-                    .disabled(model.overrides.isEmpty)
-            }
-            .buttonStyle(.link)
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
+    /// The sidebar wants an optional selection; never let it become empty.
+    private var selection: Binding<SettingsPage?> {
+        Binding(
+            get: { navigation.page },
+            set: { if let page = $0 { navigation.page = page } }
+        )
     }
 
     @ViewBuilder
     private var detail: some View {
-        switch page ?? .appearance {
+        switch navigation.page {
         case .appearance:
             AppearanceSettingsPage(model: model)
         case .font:
             FontSettingsPage(model: model)
+        case .window:
+            WindowSettingsPage(model: model)
+        case .tools:
+            ToolsSettingsPage(
+                keepAwake: tools.keepAwake,
+                preferences: tools.preferences,
+                hosts: tools.hosts
+            )
+        case .advanced:
+            AdvancedSettingsPage(model: model)
         }
     }
 
