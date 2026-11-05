@@ -6,7 +6,18 @@ import GhosttyKit
 
 /// A classic, tabbed terminal experience.
 class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Controller {
+    /// The window nib of the tab group a new tab joins, set by `newTab`. Each
+    /// tab is a window, so after macos-titlebar-style changes a tab made from
+    /// the config would mix styles in one group and break its tab bar. New
+    /// windows still use the configured style. Nil uses the configured style.
+    private var tabGroupWindowNibName: NSNib.Name?
+
+    /// The nib this controller's window was loaded from.
+    private(set) var loadedWindowNibName: NSNib.Name?
+
     override var windowNibName: NSNib.Name? {
+        if let tabGroupWindowNibName { return tabGroupWindowNibName }
+
         let defaultValue = "Terminal"
 
         guard let appDelegate = NSApp.delegate as? AppDelegate else { return defaultValue }
@@ -64,7 +75,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     init(_ ghostty: Ghostty.App,
          withBaseConfig base: Ghostty.SurfaceConfiguration? = nil,
          withSurfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil,
-         parent: NSWindow? = nil
+         parent: NSWindow? = nil,
+         tabGroupWindowNibName: NSNib.Name? = nil
     ) {
         // The window we manage is not restorable if we've specified a command
         // to execute. We do this because the restored window is meaningless at the
@@ -75,6 +87,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
         // Setup our initial derived config based on the current app config
         self.derivedConfig = DerivedConfig(ghostty.config)
+
+        // Before super.init: the window is loaded by the time init returns.
+        self.tabGroupWindowNibName = tabGroupWindowNibName
 
         super.init(ghostty, baseConfig: base, surfaceTree: tree)
 
@@ -442,7 +457,11 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         }
 
         // Create a new window and add it to the parent
-        let controller = TerminalController.init(ghostty, withBaseConfig: baseConfig)
+        let controller = TerminalController.init(
+            ghostty,
+            withBaseConfig: baseConfig,
+            tabGroupWindowNibName: parentController.loadedWindowNibName
+        )
         controller.isBackgroundOpaque = parentController.isBackgroundOpaque
         guard let window = controller.window else { return controller }
 
@@ -1094,6 +1113,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     override func windowDidLoad() {
         super.windowDidLoad()
+        loadedWindowNibName = windowNibName
         guard let window else { return }
 
         // I copy this because we may change the source in the future but also because

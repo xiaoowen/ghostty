@@ -106,7 +106,7 @@ struct ToolsSettingsPage: View {
     private func titlebarRow(isOn: Binding<Bool>, note: String) -> some View {
         SettingsRow(
             title: "在窗口顶部栏显示",
-            note: note + "。标题栏样式为「标签页」或「隐藏」时不显示"
+            note: note + "。标题栏样式为「隐藏」时没有顶部栏，不显示；macOS 15 及更早版本的「标签页」样式也不显示"
         ) {
             Toggle("在窗口顶部栏显示", isOn: isOn)
                 .labelsHidden()
@@ -392,7 +392,7 @@ struct HostEditor: View {
         } header: {
             Text("连接")
         } footer: {
-            Text("SSH 和 SFTP 共用这些信息，MFA 验证码在终端里手动输入。复用登录：登录一次后，所选时间内新开的 SSH/SFTP 不再验证。")
+            Text("SSH 和 SFTP 共用这些信息，MFA 验证码在终端里手动输入。复用登录：登录一次后，所选时间内新开的 SSH/SFTP 不再验证。阿里云等部分堡垒机每条连接只允许一个会话，会话结束就断开整条连接，不支持复用，请保持关闭。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -429,7 +429,7 @@ struct HostEditor: View {
         )
     }
 
-    /// Stores nil for the default (60) so the JSON stays short.
+    /// Stores nil for the default (off) so the JSON stays short.
     private var reuse: Binding<Int> {
         Binding(
             get: { draft.reuseMinutes ?? RemoteMux.defaultMinutes },

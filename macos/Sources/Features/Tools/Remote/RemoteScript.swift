@@ -30,7 +30,8 @@ enum RemoteScript {
     #   * when AUTOFILL is 1, types the password stored in the Keychain item
     #     SERVICE/ACCOUNT into the first password prompt;
     #   * when HOSTKEY is "accept", answers "yes" to an unknown host key prompt.
-    # Everything else, including MFA prompts, is left to the user.
+    # Everything else, including MFA prompts, is left to the user. Once those
+    # prompts are answered (or the minute is up), the session runs untouched.
 
     if {[llength $argv] < 6 || [lindex $argv 4] ne "--"} {
         send_user "usage: ghostty-remote.exp SERVICE ACCOUNT AUTOFILL HOSTKEY -- COMMAND...\n"
@@ -62,23 +63,43 @@ enum RemoteScript {
     } WINCH
 
     set deadline [expr {[clock seconds] + 60}]
-    set filled 0
 
-    interact {
-        -o
-        -re {(?i)password:} {
-            send_user -- $interact_out(0,string)
-            if {!$filled && $password ne "" && [clock seconds] < $deadline} {
-                set filled 1
+    # Watch the output only for prompts we can still answer, and stop at the
+    # first one we answer for good: the password, or the host key when there
+    # is no password to fill. -nobuffer passes output on as it arrives;
+    # without it Expect holds back text that could start a prompt ("p", "(")
+    # until more output comes, which leaves full-screen programs such as a
+    # bastion's host menu half drawn while they wait for a key.
+    set prompts {}
+    if {$password ne ""} {
+        lappend prompts -nobuffer -re {(?i)password:} {
+            if {[clock seconds] < $deadline} {
                 send -- "$password\r"
             }
+            return
         }
-        -re {\(yes/no[^)]*\)\?} {
-            send_user -- $interact_out(0,string)
-            if {$hostkey eq "accept" && [clock seconds] < $deadline} {
+    }
+    if {$hostkey eq "accept"} {
+        lappend prompts -nobuffer -re {\(yes/no[^)]*\)\?} {
+            if {[clock seconds] < $deadline} {
                 send -- "yes\r"
             }
+            if {$password eq "" || [clock seconds] >= $deadline} {
+                return
+            }
         }
+    }
+
+    # Then pass everything through untouched, like running COMMAND directly.
+    set ended 0
+    if {[llength $prompts] > 0} {
+        interact -o {*}$prompts eof {
+            set ended 1
+            return
+        }
+    }
+    if {!$ended} {
+        interact
     }
 
     # Exit with the client's status so the tab shows why it ended.

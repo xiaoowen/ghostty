@@ -10,7 +10,7 @@ struct WindowSettingsPage: View {
             TerminalPreview(model: model)
 
             SettingsSection("窗口") {
-                SettingRow(model: model, title: "标题栏样式", key: .macosTitlebarStyle, note: "对之后打开的窗口生效") {
+                SettingRow(model: model, title: "标题栏样式", key: .macosTitlebarStyle, note: "对之后新建的窗口生效；已有窗口里新开的标签沿用该窗口的样式") {
                     Picker("标题栏样式", selection: stringBinding(.macosTitlebarStyle)) {
                         Text("透明").tag("transparent")
                         Text("原生").tag("native")

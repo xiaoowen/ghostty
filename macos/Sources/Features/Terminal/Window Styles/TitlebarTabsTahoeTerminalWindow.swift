@@ -13,8 +13,21 @@ class TitlebarTabsTahoeTerminalWindow: TransparentTitlebarTerminalWindow, NSTool
     /// the native tabs back into the menu bar.
     override var supportsUpdateAccessory: Bool { false }
 
+    /// The keep-awake and remote host buttons fit: `setupTabBar` ends the
+    /// tab bar where they start.
+    override var supportsToolsAccessory: Bool { true }
+
+    /// Ends the tab bar before the keep-awake and remote host buttons.
+    private var toolsInsetConstraint: NSLayoutConstraint?
+
+    /// Keeps `toolsInsetConstraint` in step with the buttons' width.
+    private var toolsFrameObserver: NSObjectProtocol?
+
     deinit {
         tabBarObserver = nil
+        if let toolsFrameObserver {
+            NotificationCenter.default.removeObserver(toolsFrameObserver)
+        }
     }
 
     // MARK: NSWindow
@@ -193,10 +206,18 @@ class TitlebarTabsTahoeTerminalWindow: TransparentTitlebarTerminalWindow, NSTool
         clipView.translatesAutoresizingMaskIntoConstraints = false
         accessoryView.translatesAutoresizingMaskIntoConstraints = false
 
+        // The tab bar fills the toolbar, except for the keep-awake and remote
+        // host buttons at its end. Only the tab bar is constrained: AppKit
+        // places titlebar accessories itself and throws if layout moves one.
+        toolsInsetConstraint?.isActive = false
+        let fillRight = clipView.rightAnchor.constraint(equalTo: container.rightAnchor, constant: -toolsInset)
+        toolsInsetConstraint = fillRight
+        observeToolsWidth()
+
         // Setup all our constraints
         NSLayoutConstraint.activate([
             clipView.leftAnchor.constraint(equalTo: container.leftAnchor, constant: leftPadding),
-            clipView.rightAnchor.constraint(equalTo: container.rightAnchor),
+            fillRight,
             clipView.topAnchor.constraint(equalTo: container.topAnchor, constant: 2),
             clipView.heightAnchor.constraint(equalTo: container.heightAnchor),
             accessoryView.leftAnchor.constraint(equalTo: clipView.leftAnchor),
@@ -234,6 +255,36 @@ class TitlebarTabsTahoeTerminalWindow: TransparentTitlebarTerminalWindow, NSTool
             // Wait a tick to let the new tab bars appear and then set them up.
             DispatchQueue.main.async {
                 self.setupTabBar()
+            }
+        }
+    }
+
+    /// Room the tab bar leaves at its end for the keep-awake and remote host
+    /// buttons, which sit at the right edge of the toolbar.
+    private var toolsInset: CGFloat {
+        guard let toolsView = toolsAccessoryView,
+              toolsView.window === self,
+              toolsView.frame.width > 0 else { return 0 }
+        return toolsView.frame.width + 6
+    }
+
+    /// The buttons get wider or narrower as they're shown or hidden in
+    /// Settings; move the end of the tab bar with them.
+    private func observeToolsWidth() {
+        guard toolsFrameObserver == nil, let toolsView = toolsAccessoryView else { return }
+        toolsView.postsFrameChangedNotifications = true
+        toolsFrameObserver = NotificationCenter.default.addObserver(
+            forName: NSView.frameDidChangeNotification,
+            object: toolsView,
+            queue: .main
+        ) { [weak self] _ in
+            // Not in the middle of AppKit laying out the titlebar.
+            DispatchQueue.main.async {
+                guard let self, let constraint = self.toolsInsetConstraint else { return }
+                let constant = -self.toolsInset
+                if constraint.constant != constant {
+                    constraint.constant = constant
+                }
             }
         }
     }

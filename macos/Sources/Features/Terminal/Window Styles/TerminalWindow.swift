@@ -54,6 +54,16 @@ class TerminalWindow: NSWindow {
         true
     }
 
+    /// Whether this window shows the keep-awake and remote host buttons as a
+    /// titlebar accessory. A style that lays out its own titlebar turns this
+    /// on only if it keeps that layout clear of `toolsAccessoryView`.
+    var supportsToolsAccessory: Bool { supportsUpdateAccessory }
+
+    /// The keep-awake and remote host buttons, while they're in the titlebar.
+    var toolsAccessoryView: NSView? {
+        titlebarAccessoryViewControllers.contains(toolsAccessory) ? toolsAccessory.view : nil
+    }
+
     /// Glass effect view for liquid glass background when transparency is enabled
     private var glassEffectView: NSView?
 
@@ -156,8 +166,10 @@ class TerminalWindow: NSWindow {
                 ))
                 addTitlebarAccessoryViewController(updateAccessory)
                 updateAccessory.view.translatesAutoresizingMaskIntoConstraints = false
+            }
 
-                // Keep-awake and remote host buttons, set up like the update accessory
+            // Keep-awake and remote host buttons, set up like the update accessory
+            if supportsToolsAccessory {
                 toolsAccessory.layoutAttribute = .right
                 toolsAccessory.view = NonDraggableHostingView(rootView: ToolsAccessoryView(
                     viewModel: viewModel,
@@ -743,7 +755,10 @@ extension TerminalWindow {
 
         var body: some View {
             TitlebarToolsView(keepAwake: keepAwake, hosts: hosts, preferences: preferences)
-                .padding(.top, viewModel.accessoryTopPadding)
+                // Padded on both sides so the view is as tall as the titlebar
+                // row and the buttons sit in its middle wherever AppKit
+                // anchors the accessory: the top on macOS 26, the bottom on 27.
+                .padding(.vertical, viewModel.accessoryTopPadding)
                 .padding(.trailing, viewModel.accessoryTopPadding)
         }
     }
