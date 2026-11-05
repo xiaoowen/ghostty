@@ -124,24 +124,19 @@ struct SettingsView: View {
                 .fill(Color.primary.opacity(0.08))
                 .frame(width: 1)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    SettingsPageHeader(page: navigation.page) {
-                        let changed = navigation.page.keys.filter(model.isOverridden)
-                        if !changed.isEmpty {
-                            Button("恢复本页") { changed.forEach(model.reset) }
-                                .help("恢复本页 \(changed.count) 项修改为 config.ghostty 中的值")
-                        }
-                    }
-                    banners
-                    detail
-                }
-                .padding(.horizontal, 30)
-                .padding(.top, 38)
-                .padding(.bottom, 30)
-                .frame(maxWidth: 780, alignment: .leading)
-                .frame(maxWidth: .infinity)
+            // In a ZStack so the outgoing and incoming pages overlap while
+            // they cross-fade.
+            ZStack {
+                pageScrollView
+                    // A new scroll view per page: each page opens at its top,
+                    // and fades in as the previous one fades out.
+                    .id(navigation.page)
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .offset(y: 8)),
+                        removal: .opacity
+                    ))
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(colors.backgroundColor)
         }
         // Under the translucent divider and anything else not painted.
@@ -154,6 +149,33 @@ struct SettingsView: View {
         .environment(\.colorScheme, colors.colorScheme)
         .background(WindowAppearanceSetter(isDark: !colors.isLight))
         .onAppear { model.loadThemesIfNeeded() }
+    }
+
+    /// The selected page: its header, notices and options.
+    private var pageScrollView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                SettingsPageHeader(page: navigation.page) {
+                    let changed = navigation.page.keys.filter(model.isOverridden)
+                    if !changed.isEmpty {
+                        Button {
+                            changed.forEach(model.reset)
+                        } label: {
+                            Label("恢复本页", systemImage: "arrow.uturn.backward")
+                        }
+                        .buttonStyle(ToolChipButtonStyle())
+                        .help("恢复本页 \(changed.count) 项修改为 config.ghostty 中的值")
+                    }
+                }
+                banners
+                detail
+            }
+            .padding(.horizontal, 30)
+            .padding(.top, 38)
+            .padding(.bottom, 30)
+            .frame(maxWidth: 780, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
     }
 
     @ViewBuilder
@@ -212,9 +234,10 @@ private struct SettingsSidebar: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Ghostty")
                         .font(.system(size: 14, weight: .bold))
-                    Text("设置")
+                    Text(Self.subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
             .padding(.leading, 18)
@@ -224,7 +247,13 @@ private struct SettingsSidebar: View {
 
             VStack(spacing: 2) {
                 ForEach(SettingsPage.allCases) { page in
-                    row(page)
+                    SettingsSidebarRow(
+                        page: page,
+                        isSelected: navigation.page == page,
+                        changes: page.keys.filter(model.isOverridden).count
+                    ) {
+                        withAnimation(.easeOut(duration: 0.2)) { navigation.page = page }
+                    }
                 }
             }
             .padding(.horizontal, 10)
@@ -237,36 +266,11 @@ private struct SettingsSidebar: View {
         }
     }
 
-    private func row(_ page: SettingsPage) -> some View {
-        let selected = navigation.page == page
-        let changes = page.keys.filter(model.isOverridden).count
-        return Button {
-            navigation.page = page
-        } label: {
-            HStack(spacing: 9) {
-                IconTile(symbol: page.symbolName, colors: page.tileColors)
-                Text(page.title)
-                    .font(.system(size: 13, weight: selected ? .semibold : .regular))
-                Spacer(minLength: 4)
-                if changes > 0 {
-                    Text("\(changes)")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundColor(.accentColor)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(Color.accentColor.opacity(0.15)))
-                        .help("本页有 \(changes) 项修改")
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(selected ? Color.accentColor.opacity(0.22) : Color.clear)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+    /// "设置 · 1.4.1"
+    private static var subtitle: String {
+        guard let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+              !version.isEmpty else { return "设置" }
+        return "设置 · \(version)"
     }
 
     private var status: some View {
@@ -294,5 +298,50 @@ private struct SettingsSidebar: View {
             .buttonStyle(.plain)
             .foregroundColor(.accentColor)
         }
+    }
+}
+
+/// A page in the sidebar: highlighted when selected, lighter under the mouse.
+private struct SettingsSidebarRow: View {
+    let page: SettingsPage
+    let isSelected: Bool
+    let changes: Int
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                IconTile(symbol: page.symbolName, colors: page.tileColors)
+                Text(page.title)
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                Spacer(minLength: 4)
+                if changes > 0 {
+                    Text("\(changes)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundColor(.accentColor)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                        .help("本页有 \(changes) 项修改")
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(background)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovering)
+    }
+
+    private var background: Color {
+        if isSelected { return Color.accentColor.opacity(0.22) }
+        return Color.primary.opacity(isHovering ? 0.06 : 0)
     }
 }

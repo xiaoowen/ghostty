@@ -60,11 +60,22 @@ final class SettingsController: NSWindowController, NSWindowDelegate {
 
     /// Shows the window, switching to `page` if given.
     func show(page: SettingsPage? = nil) {
+        let isOpening = !(window?.isVisible ?? false)
         if let page { navigation.page = page }
         model.refresh()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+
+        // Nothing focused until Tab, however the window was opened. With
+        // keyboard navigation on, SwiftUI otherwise focuses the first sidebar
+        // row (外观) as the window becomes key, e.g. when opened from the
+        // host panel. Cleared right away so no focus ring is drawn, and once
+        // more after SwiftUI's own update, which can set it again.
+        if isOpening, let window {
+            window.makeFirstResponder(nil)
+            DispatchQueue.main.async { window.makeFirstResponder(nil) }
+        }
     }
 
     func windowWillClose(_ notification: Notification) {
