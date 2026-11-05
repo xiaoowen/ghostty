@@ -106,7 +106,7 @@ struct ToolsSettingsPage: View {
     private func titlebarRow(isOn: Binding<Bool>, note: String) -> some View {
         SettingsRow(
             title: "在窗口顶部栏显示",
-            note: note + "。标题栏样式为「标签页」或「隐藏」时不显示"
+            note: note + "。标题栏样式为「隐藏」时没有顶部栏，不显示；macOS 15 及更早版本的「标签页」样式也不显示"
         ) {
             Toggle("在窗口顶部栏显示", isOn: isOn)
                 .labelsHidden()
