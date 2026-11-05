@@ -67,21 +67,30 @@ struct RemoteHostLaunchTests {
         return nil
     }
 
-    @Test func structuredHostUsesTsshWithZmodemAndReuseByDefault() {
+    @Test func structuredHostUsesTsshWithZmodemByDefault() {
         let host = RemoteHost(name: "堡垒机", host: " bastion ", user: "jumpserver", port: 60022)
-        let plan = RemoteMux.plan(destination: "jumpserver@bastion", port: 60022, minutes: 60)
         #expect(managed(host, .ssh) == RemoteManagedSession(
-            argv: ["tssh", "--zmodem", "-p", "60022", "-o", "ControlPath=\(plan.controlPath)", "jumpserver@bastion"],
+            argv: ["tssh", "--zmodem", "-p", "60022", "jumpserver@bastion"],
             keychainAccount: "堡垒机",
             autoPassword: true,
             acceptHostKey: false,
-            mux: plan
+            mux: nil
         ))
+        #expect(managed(host, .sftp)?.argv == ["sftp", "-P", "60022", "jumpserver@bastion"])
+        #expect(host.displayCommand(for: .ssh) == "tssh --zmodem -p 60022 jumpserver@bastion")
+        #expect(host.usesKeychainPassword)
+    }
+
+    @Test func reuseAddsTheControlSocket() {
+        let host = RemoteHost(name: "a", host: "bastion", user: "jumpserver", port: 60022, reuseMinutes: 60)
+        let plan = RemoteMux.plan(destination: "jumpserver@bastion", port: 60022, minutes: 60)
+        #expect(managed(host, .ssh)?.mux == plan)
+        #expect(managed(host, .ssh)?.argv
+            == ["tssh", "--zmodem", "-p", "60022", "-o", "ControlPath=\(plan.controlPath)", "jumpserver@bastion"])
         #expect(managed(host, .sftp)?.argv
             == ["sftp", "-P", "60022", "-o", "ControlPath=\(plan.controlPath)", "jumpserver@bastion"])
         // Tooltips leave the control socket out.
         #expect(host.displayCommand(for: .ssh) == "tssh --zmodem -p 60022 jumpserver@bastion")
-        #expect(host.usesKeychainPassword)
     }
 
     @Test func clientOptions() {
@@ -199,6 +208,21 @@ struct RemoteScriptTests {
         try Data("old".utf8).write(to: url)
         try RemoteScript.install(in: dir)
         #expect(try String(contentsOf: url, encoding: .utf8) == RemoteScript.source)
+    }
+
+    /// Without -nobuffer, Expect holds back output that could start a prompt
+    /// ("p", "(") until more arrives, so a full-screen program waiting for a
+    /// key, like a bastion's host menu, looks half drawn.
+    @Test func promptsDoNotHoldBackOutput() {
+        let lines = RemoteScript.source
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        let patterns = lines.filter { $0.contains("-re {") }
+        #expect(patterns.count == 2)
+        #expect(patterns.allSatisfy { $0.hasPrefix("lappend prompts -nobuffer -re ") })
+
+        // Once the prompts are answered, the session runs through a plain interact.
+        #expect(lines.contains("interact"))
     }
 }
 
@@ -456,7 +480,9 @@ struct RemoteMuxTests {
     }
 
     @Test func reuseIsPerHost() {
-        #expect(RemoteHost(name: "a", host: "h").muxPlan?.minutes == 60)
+        // Off unless turned on: some bastions close the connection with its first session.
+        #expect(RemoteHost(name: "a", host: "h").muxPlan == nil)
+        #expect(RemoteHost(name: "a", host: "h", reuseMinutes: 60).muxPlan?.minutes == 60)
         #expect(RemoteHost(name: "a", host: "h", reuseMinutes: 15).muxPlan?.minutes == 15)
         #expect(RemoteHost(name: "a", host: "h", reuseMinutes: 0).muxPlan == nil)
         #expect(RemoteHost(name: "a", sshCommand: "tjump").muxPlan == nil)

@@ -50,7 +50,7 @@ struct RemoteHost: Codable, Hashable, Identifiable {
 
     /// Minutes a logged-in connection stays reusable after its last session
     /// closes; new SSH/SFTP sessions in that time skip the password and MFA.
-    /// 0 turns reuse off. Defaults to 60. See `RemoteMux`.
+    /// 0 turns reuse off. Defaults to off. See `RemoteMux`.
     var reuseMinutes: Int?
 
     var id: String { name }

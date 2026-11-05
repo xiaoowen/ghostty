@@ -30,7 +30,10 @@ struct RemoteMuxPlan: Equatable {
 }
 
 enum RemoteMux {
-    static let defaultMinutes = 60
+    /// Off unless turned on per host: some bastions, Aliyun's among them,
+    /// allow one session per connection and close the connection when it
+    /// ends, so a reused session never gets its shell.
+    static let defaultMinutes = 0
 
     /// Choices offered in the host editor; 0 turns reuse off.
     static let minuteChoices = [0, 15, 60, 240, 480]

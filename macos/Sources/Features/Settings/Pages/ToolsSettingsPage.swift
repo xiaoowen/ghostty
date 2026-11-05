@@ -392,7 +392,7 @@ struct HostEditor: View {
         } header: {
             Text("连接")
         } footer: {
-            Text("SSH 和 SFTP 共用这些信息，MFA 验证码在终端里手动输入。复用登录：登录一次后，所选时间内新开的 SSH/SFTP 不再验证。")
+            Text("SSH 和 SFTP 共用这些信息，MFA 验证码在终端里手动输入。复用登录：登录一次后，所选时间内新开的 SSH/SFTP 不再验证。阿里云等部分堡垒机每条连接只允许一个会话，会话结束就断开整条连接，不支持复用，请保持关闭。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -429,7 +429,7 @@ struct HostEditor: View {
         )
     }
 
-    /// Stores nil for the default (60) so the JSON stays short.
+    /// Stores nil for the default (off) so the JSON stays short.
     private var reuse: Binding<Int> {
         Binding(
             get: { draft.reuseMinutes ?? RemoteMux.defaultMinutes },
