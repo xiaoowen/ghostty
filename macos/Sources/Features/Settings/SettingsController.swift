@@ -13,6 +13,9 @@ final class SettingsController: NSWindowController, NSWindowDelegate {
     let navigation = SettingsNavigation()
     private var configObserver: NSObjectProtocol?
 
+    /// Keeps SwiftUI from focusing the 外观 sidebar row by itself.
+    private var focusSuppressor: AutomaticFocusSuppressor?
+
     private init() {
         model = SettingsModel(environment: .live)
 
@@ -39,6 +42,7 @@ final class SettingsController: NSWindowController, NSWindowDelegate {
 
         super.init(window: window)
         window.delegate = self
+        focusSuppressor = AutomaticFocusSuppressor(window: window)
 
         // Pick up edits made to config.ghostty by hand (Reload Configuration).
         configObserver = NotificationCenter.default.addObserver(
@@ -60,11 +64,16 @@ final class SettingsController: NSWindowController, NSWindowDelegate {
 
     /// Shows the window, switching to `page` if given.
     func show(page: SettingsPage? = nil) {
+        // Opens with nothing focused, however it's opened (⌘, or the gear
+        // in the host panel) and whatever was focused when it closed.
+        let isOpening = !(window?.isVisible ?? false)
+        if isOpening { focusSuppressor?.reset() }
         if let page { navigation.page = page }
         model.refresh()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        if isOpening { focusSuppressor?.clearAutomaticFocus() }
     }
 
     func windowWillClose(_ notification: Notification) {

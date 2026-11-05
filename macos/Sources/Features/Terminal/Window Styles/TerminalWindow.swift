@@ -754,12 +754,18 @@ extension TerminalWindow {
         let preferences: ToolsPreferences
 
         var body: some View {
-            TitlebarToolsView(keepAwake: keepAwake, hosts: hosts, preferences: preferences)
-                // Padded on both sides so the view is as tall as the titlebar
-                // row and the buttons sit in its middle wherever AppKit
-                // anchors the accessory: the top on macOS 26, the bottom on 27.
-                .padding(.vertical, viewModel.accessoryTopPadding)
-                .padding(.trailing, viewModel.accessoryTopPadding)
+            TitlebarToolsView(
+                keepAwake: keepAwake,
+                hosts: hosts,
+                preferences: preferences,
+                // With a toolbar the buttons match the tab bar next to them.
+                size: viewModel.hasToolbar ? .regular : .compact
+            )
+            // As tall as the titlebar row, so the buttons sit in its middle
+            // wherever AppKit anchors the accessory: the top on macOS 26, the
+            // bottom on 27.
+            .frame(height: 20 + 2 * viewModel.accessoryTopPadding)
+            .padding(.trailing, viewModel.accessoryTopPadding)
         }
     }
 

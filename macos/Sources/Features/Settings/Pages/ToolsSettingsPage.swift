@@ -261,6 +261,7 @@ private struct HostRow: View {
                 } label: {
                     Label(kind.label, systemImage: kind.symbolName)
                 }
+                .buttonStyle(ToolChipButtonStyle())
                 .disabled(host.launch(for: kind) == nil)
                 .help(host.displayCommand(for: kind) ?? "")
             }
