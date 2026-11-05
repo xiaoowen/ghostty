@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import OSLog
 
@@ -39,6 +40,22 @@ final class KeepAwake: ObservableObject {
         }
     }
 
+    /// What just changed, for feedback such as the toast shown after a click.
+    enum Event: Equatable {
+        /// Turned on, or restarted with a new duration while already on.
+        case started(endDate: Date?, wasOn: Bool)
+        /// A timed session got longer.
+        case extended(by: TimeInterval, endDate: Date)
+        /// `-i` was turned on or off while on.
+        case systemSleepChanged(Bool)
+        /// Turned off with `stop()`.
+        case stopped
+        /// caffeinate exited by itself: its timer ran out, or something killed it.
+        case ended(timerFinished: Bool)
+        /// caffeinate could not be started.
+        case failed
+    }
+
     private static let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "com.mitchellh.ghostty",
         category: "KeepAwake"
@@ -58,9 +75,13 @@ final class KeepAwake: ObservableObject {
         didSet {
             guard preventSystemSleep != oldValue else { return }
             defaults.set(preventSystemSleep, forKey: Self.preventSystemSleepKey)
-            if isOn { start(seconds: remainingSeconds) }
+            guard isOn else { return }
+            events.send(launch(seconds: remainingSeconds) ? .systemSleepChanged(preventSystemSleep) : .failed)
         }
     }
+
+    /// Sends each change right after it happens, on the main thread.
+    let events = PassthroughSubject<Event, Never>()
 
     private let defaults: UserDefaults
     private let executableURL: URL
@@ -100,9 +121,19 @@ final class KeepAwake: ObservableObject {
         start(seconds: preset.seconds)
     }
 
-    /// Start, or restart with new settings. `seconds == nil` keeps the display
-    /// awake until `stop()` is called or Ghostty quits.
+    /// Start, or restart with a new duration. `seconds == nil` keeps the
+    /// display awake until `stop()` is called or Ghostty quits.
     func start(seconds: TimeInterval?) {
+        let wasOn = isOn
+        guard launch(seconds: seconds) else {
+            events.send(.failed)
+            return
+        }
+        events.send(.started(endDate: endDate, wasOn: wasOn))
+    }
+
+    /// Replaces any running caffeinate with a new one. Returns whether it started.
+    private func launch(seconds: TimeInterval?) -> Bool {
         terminateProcess()
 
         var args = ["-d"]
@@ -127,18 +158,21 @@ final class KeepAwake: ObservableObject {
             Self.logger.warning("failed to start caffeinate: \(error.localizedDescription, privacy: .public)")
             isOn = false
             endDate = nil
-            return
+            return false
         }
 
         process = p
         isOn = true
         endDate = seconds.map { Date().addingTimeInterval($0) }
+        return true
     }
 
     func stop() {
+        let wasOn = isOn
         terminateProcess()
         isOn = false
         endDate = nil
+        if wasOn { events.send(.stopped) }
     }
 
     /// Add time to a timed session. Starts a timed session if off, and does
@@ -149,7 +183,11 @@ final class KeepAwake: ObservableObject {
             return
         }
         guard let remainingSeconds else { return }
-        start(seconds: remainingSeconds + seconds)
+        guard launch(seconds: remainingSeconds + seconds), let endDate else {
+            events.send(.failed)
+            return
+        }
+        events.send(.extended(by: seconds, endDate: endDate))
     }
 
     /// Formats a duration as "42 分钟", "1 小时" or "1 小时 5 分钟".
@@ -170,8 +208,11 @@ final class KeepAwake: ObservableObject {
     private func processDidExit(pid: Int32) {
         // Exits from a process we already replaced or stopped are expected.
         guard let process, process.processIdentifier == pid else { return }
+        // caffeinate -t exits on time; allow for the timer being a little early.
+        let timerFinished = endDate.map { $0.timeIntervalSinceNow < 2 } ?? false
         self.process = nil
         isOn = false
         endDate = nil
+        events.send(.ended(timerFinished: timerFinished))
     }
 }

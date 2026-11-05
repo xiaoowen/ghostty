@@ -23,6 +23,8 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
 
     private var shortcutObserver: AnyCancellable?
 
+    private var toastObserver: AnyCancellable?
+
     /// Whether a Keychain password is saved for a host name.
     private let passwordSaved: (String) -> Bool
 
@@ -48,7 +50,8 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
     }
 
     /// Adds the 「工具」 menu to the main menu bar before the Window menu and
-    /// starts the menu bar indicator. Safe to call more than once.
+    /// starts confirming keep-awake changes with a toast. Safe to call more
+    /// than once.
     func install() {
         guard let mainMenu = NSApp.mainMenu,
               !mainMenu.items.contains(where: { $0.submenu === menu }) else { return }
@@ -74,6 +77,12 @@ final class ToolsMenuController: NSObject, NSMenuDelegate {
                     self.rebuild(self.menu)
                 }
             }
+
+        // Confirm each keep-awake change, wherever it came from: the titlebar
+        // button, this menu, the shortcut, the command palette or the Dock.
+        toastObserver = keepAwake.events.sink { event in
+            ToolsToast.shared.show(.keepAwake(event))
+        }
 
         if preferences.keepAwakeOnLaunch && !keepAwake.isOn {
             keepAwake.start(.indefinite)

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Testing
 @testable import Ghostty
 
@@ -244,6 +245,80 @@ struct KeepAwakeTests {
         #expect(!keepAwake.isOn)
         #expect(keepAwake.remainingSeconds == nil)
         #expect(keepAwake.remainingText == nil)
+    }
+
+    /// Stands in for caffeinate: ignores its arguments and runs until stopped.
+    private static func fakeCaffeinate() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("fake-caffeinate-\(UUID().uuidString)")
+        try "#!/bin/sh\nexec /bin/sleep 30\n".write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        return url
+    }
+
+    @Test func eventsDescribeEachChange() throws {
+        let fake = try Self.fakeCaffeinate()
+        defer { try? FileManager.default.removeItem(at: fake) }
+        let defaults = UserDefaults(suiteName: "KeepAwakeTests-\(UUID().uuidString)")!
+        let keepAwake = KeepAwake(defaults: defaults, executableURL: fake)
+        var events: [KeepAwake.Event] = []
+        let subscription = keepAwake.events.sink { events.append($0) }
+        defer {
+            subscription.cancel()
+            keepAwake.stop()
+        }
+
+        keepAwake.start(seconds: nil)
+        keepAwake.extend(by: 3600)  // untimed: nothing to extend
+        keepAwake.start(seconds: 1800)
+        keepAwake.extend(by: 3600)
+        keepAwake.preventSystemSleep = true
+        keepAwake.stop()
+        keepAwake.stop()  // already off
+
+        try #require(events.count == 5)
+        #expect(events[0] == .started(endDate: nil, wasOn: false))
+        if case .started(let end?, true) = events[1] {
+            #expect(abs(end.timeIntervalSinceNow - 1800) < 5)
+        } else {
+            Issue.record("expected a timed restart, got \(events[1])")
+        }
+        if case .extended(3600, let end) = events[2] {
+            #expect(abs(end.timeIntervalSinceNow - 5400) < 5)
+        } else {
+            Issue.record("expected an extension, got \(events[2])")
+        }
+        #expect(events[3] == .systemSleepChanged(true))
+        #expect(events[4] == .stopped)
+    }
+
+    @Test func failureToStartIsReported() {
+        let defaults = UserDefaults(suiteName: "KeepAwakeTests-\(UUID().uuidString)")!
+        let keepAwake = KeepAwake(defaults: defaults, executableURL: URL(fileURLWithPath: "/nonexistent/caffeinate"))
+        var events: [KeepAwake.Event] = []
+        let subscription = keepAwake.events.sink { events.append($0) }
+        defer { subscription.cancel() }
+
+        keepAwake.toggle()
+        #expect(!keepAwake.isOn)
+        #expect(events == [.failed])
+    }
+
+    @Test func toastMessages() {
+        let now = Date()
+        func toast(_ event: KeepAwake.Event) -> String {
+            let message = ToolsToastMessage.keepAwake(event, now: now)
+            return [message.title, message.detail].compactMap { $0 }.joined(separator: " | ")
+        }
+        #expect(toast(.started(endDate: nil, wasOn: false)) == "防息屏已开启 | 不限时")
+        #expect(toast(.started(endDate: now + 1800, wasOn: false)) == "防息屏已开启 | 30 分钟后自动关闭")
+        #expect(toast(.started(endDate: nil, wasOn: true)) == "防息屏改为不限时")
+        #expect(toast(.started(endDate: now + 3600, wasOn: true)) == "防息屏已重新计时 | 1 小时后自动关闭")
+        #expect(toast(.extended(by: 3600, endDate: now + 5400)) == "防息屏已延长 1 小时 | 剩余 1 小时 30 分钟")
+        #expect(toast(.systemSleepChanged(false)) == "不再阻止系统休眠 | 仅保持屏幕常亮")
+        #expect(toast(.stopped) == "防息屏已关闭")
+        #expect(toast(.ended(timerFinished: true)) == "防息屏已到时关闭")
+        #expect(toast(.failed) == "无法开启防息屏 | caffeinate 启动失败")
     }
 }
 
