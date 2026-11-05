@@ -229,8 +229,9 @@ class AppDelegate: NSObject,
         // Initial config loading
         ghosttyConfigDidChange(config: ghostty.config)
 
-        // Start our update checker.
-        updateController.startUpdater()
+        // This fork never starts Sparkle: its appcast is official Ghostty's,
+        // so an update would replace the fork. "Check for Updates…" asks the
+        // fork's GitHub releases instead (ForkReleaseChecker).
 
         // Register our service provider. This must happen after everything is initialized.
         NSApp.servicesProvider = ServiceProvider()
@@ -1011,8 +1012,7 @@ class AppDelegate: NSObject,
     }
 
     @IBAction func checkForUpdates(_ sender: Any?) {
-        updateController.checkForUpdates()
-        // UpdateSimulator.happyPath.simulate(with: updateViewModel)
+        ForkReleaseChecker.shared.check()
     }
 
     @IBAction func newWindow(_ sender: Any?) {
